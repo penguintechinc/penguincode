@@ -134,8 +134,20 @@ class OllamaClient:
                     data = json.loads(line)
                     # Convert message dict to Message object
                     if "message" in data:
-                        data["message"] = Message(**data["message"])
-                    yield ChatResponse(**data)
+                        msg_data = data["message"]
+                        data["message"] = Message(
+                            role=msg_data.get("role", "assistant"),
+                            content=msg_data.get("content", ""),
+                            images=msg_data.get("images"),
+                        )
+                    # Filter to known ChatResponse fields to handle API changes
+                    known_fields = {
+                        "model", "created_at", "message", "done", "done_reason",
+                        "total_duration", "load_duration", "prompt_eval_count",
+                        "prompt_eval_duration", "eval_count", "eval_duration",
+                    }
+                    filtered_data = {k: v for k, v in data.items() if k in known_fields}
+                    yield ChatResponse(**filtered_data)
 
     async def list_models(self) -> List[ModelInfo]:
         """

@@ -67,6 +67,7 @@ class ChatResponse:
     created_at: str
     message: Message
     done: bool
+    done_reason: Optional[str] = None
     total_duration: Optional[int] = None
     load_duration: Optional[int] = None
     prompt_eval_count: Optional[int] = None
