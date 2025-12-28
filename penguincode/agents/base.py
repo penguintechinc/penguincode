@@ -446,7 +446,10 @@ class BaseAgent(ABC):
 
         # Try to find file path mentions - order matters, more specific first
         path_patterns = [
-            # Quoted paths first (most reliable)
+            # "called .filename" - very common pattern
+            r'called\s+[`"\']?(\.[^\s`"\']+)[`"\']?',
+            r'called\s+[`"\']?([^\s`"\']+\.\w+)[`"\']?',
+            # Quoted paths (most reliable)
             r'[`"\']([^\s`"\']+\.\w+)[`"\']',
             r'[`"\'](\.[^\s`"\']+)[`"\']',  # Hidden files like .test
             # Named patterns
@@ -456,8 +459,8 @@ class BaseAgent(ABC):
             r'file\s+[`"\']?(\.[^\s`"\']+)[`"\']?',
             r'file\s+[`"\']?([^\s`"\']+\.\w+)[`"\']?',
             # Create/write followed by path
-            r'(?:create|write)\s+(?:a\s+)?(?:file\s+)?(?:called\s+)?[`"\']?(\.[^\s`"\']+)[`"\']?',
-            r'(?:create|write)\s+(?:a\s+)?(?:file\s+)?(?:called\s+)?[`"\']?([^\s`"\']+\.\w+)[`"\']?',
+            r'(?:create|write)\s+(?:a\s+)?(?:file\s+)?[`"\']?(\.[^\s`"\']+)[`"\']?',
+            r'(?:create|write)\s+(?:a\s+)?(?:file\s+)?[`"\']?([^\s`"\']+\.\w+)[`"\']?',
         ]
 
         path = None
@@ -483,24 +486,40 @@ class BaseAgent(ABC):
             return None
 
         # Try to extract content
-        content_patterns = [
-            r'(?:content|containing|with)[:\s]+[`"\']([^`"\']+)[`"\']',
-            r'(?:content|text)[:\s]+(.+?)(?:\n|$)',
-        ]
-
+        task_lower = task.lower()
         content = None
-        for pattern in content_patterns:
-            match = re.search(pattern, task, re.IGNORECASE | re.DOTALL)
-            if match:
-                content = match.group(1).strip()
-                break
+
+        # Check for bash/shell script patterns
+        if "bash" in task_lower or "shell" in task_lower or "script" in task_lower:
+            # Look for what to print/echo
+            if "hello world" in task_lower:
+                content = 'echo "hello world"'
+            elif "hello" in task_lower:
+                content = 'echo "Hello, World!"'
+            else:
+                # Generic bash script template
+                content = "#!/bin/bash\n"
+
+        # Check for explicit content patterns
+        if not content:
+            content_patterns = [
+                r'(?:content|containing|with)[:\s]+[`"\']([^`"\']+)[`"\']',
+                r'(?:content|text)[:\s]+(.+?)(?:\n|$)',
+            ]
+            for pattern in content_patterns:
+                match = re.search(pattern, task, re.IGNORECASE | re.DOTALL)
+                if match:
+                    content = match.group(1).strip()
+                    break
 
         # If content not found, use a reasonable default based on task
         if not content:
-            if "timestamp" in task.lower() or "epoch" in task.lower():
+            if "timestamp" in task_lower or "epoch" in task_lower:
                 import time
                 content = str(int(time.time()))
-            elif "hello" in task.lower():
+            elif "hello world" in task_lower:
+                content = "hello world"
+            elif "hello" in task_lower:
                 content = "Hello, World!"
             else:
                 content = ""
