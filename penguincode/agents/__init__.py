@@ -1,9 +1,9 @@
 """Agent implementations for PenguinCode."""
 
 from .base import AgentConfig, AgentResult, BaseAgent, Permission, TOOL_DEFINITIONS
+from .chat import ChatAgent
 from .executor import ExecutorAgent
 from .explorer import ExplorerAgent
-from .orchestrator import Orchestrator
 
 __all__ = [
     "BaseAgent",
@@ -11,7 +11,7 @@ __all__ = [
     "AgentResult",
     "Permission",
     "TOOL_DEFINITIONS",
+    "ChatAgent",
     "ExecutorAgent",
     "ExplorerAgent",
-    "Orchestrator",
 ]

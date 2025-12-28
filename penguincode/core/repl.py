@@ -6,7 +6,7 @@ from typing import Optional
 
 from rich.prompt import Prompt
 
-from penguincode.agents import ExecutorAgent, ExplorerAgent, Orchestrator
+from penguincode.agents import ChatAgent, ExecutorAgent, ExplorerAgent
 from penguincode.config.settings import Settings, load_settings
 from penguincode.ollama import OllamaClient
 from penguincode.ui import console, print_error, print_info, print_success
@@ -43,9 +43,9 @@ class REPLSession:
         # Ollama client (will be initialized in async context)
         self.ollama_client: Optional[OllamaClient] = None
 
-        # Agents and orchestrator
+        # Chat agent (main orchestrator) and specialized agents
+        self.chat_agent: Optional[ChatAgent] = None
         self.agents = {}
-        self.orchestrator: Optional[Orchestrator] = None
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -56,9 +56,16 @@ class REPLSession:
         )
         await self.ollama_client.__aenter__()
 
-        # Initialize agents with models from settings
-        explorer_model = self.settings.models.orchestration  # Use fast model for exploration
-        executor_model = self.settings.models.execution  # Use coding model for execution
+        # Initialize chat agent (main orchestrator)
+        self.chat_agent = ChatAgent(
+            ollama_client=self.ollama_client,
+            settings=self.settings,
+            project_dir=str(self.project_dir),
+        )
+
+        # Keep direct agent references for manual commands (/explore, /execute)
+        explorer_model = self.settings.models.orchestration
+        executor_model = self.settings.models.execution
 
         self.agents["executor"] = ExecutorAgent(
             ollama_client=self.ollama_client,
@@ -69,14 +76,6 @@ class REPLSession:
             ollama_client=self.ollama_client,
             working_dir=str(self.project_dir),
             model=explorer_model,
-        )
-
-        # Initialize orchestrator
-        self.orchestrator = Orchestrator(
-            ollama_client=self.ollama_client,
-            settings=self.settings,
-            project_dir=str(self.project_dir),
-            agents=self.agents,
         )
 
         return self
@@ -110,8 +109,8 @@ class REPLSession:
             return False
         elif cmd == "/clear":
             console.clear()
-            if self.orchestrator:
-                self.orchestrator.reset_conversation()
+            if self.chat_agent:
+                self.chat_agent.reset_conversation()
             print_info("Screen and conversation cleared")
         elif cmd == "/history":
             self.show_history()
@@ -124,8 +123,8 @@ class REPLSession:
         elif cmd == "/execute":
             await self.handle_execute(args)
         elif cmd == "/reset":
-            if self.orchestrator:
-                self.orchestrator.reset_conversation()
+            if self.chat_agent:
+                self.chat_agent.reset_conversation()
             print_info("Conversation reset")
         else:
             print_error(f"Unknown command: {cmd}")
@@ -237,9 +236,10 @@ class REPLSession:
 
     async def handle_chat(self, message: str) -> None:
         """
-        Handle regular chat messages by sending to the orchestrator.
+        Handle regular chat messages by sending to the chat agent.
 
-        The orchestrator decides which agent to spawn based on the message.
+        The chat agent decides whether to respond directly or spawn
+        specialized agents for code/file operations.
         """
         # Save user message to session
         self.session.add_message("user", message)
@@ -247,8 +247,8 @@ class REPLSession:
         console.print()  # Add some spacing
 
         try:
-            # Use orchestrator to process the message
-            response = await self.orchestrator.process(message)
+            # Use chat agent to process the message
+            response = await self.chat_agent.process(message)
 
             # Display the response
             console.print(f"\n[bold blue]Assistant:[/bold blue]")
