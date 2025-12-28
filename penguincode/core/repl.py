@@ -607,12 +607,18 @@ class REPLSession:
         console.print(f"Models: orchestration={self.settings.models.orchestration}, execution={self.settings.models.execution}")
         console.print("\nType [bold]/help[/bold] for commands, [bold]/exit[/bold] to quit\n")
 
+        # Track consecutive Ctrl+C presses
+        interrupt_count = 0
+
         while True:
             try:
                 # Get user input
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: Prompt.ask("[bold green]You[/bold green]")
                 )
+
+                # Reset interrupt count on successful input
+                interrupt_count = 0
 
                 if not user_input.strip():
                     continue
@@ -627,12 +633,17 @@ class REPLSession:
                     await self.handle_chat(user_input)
 
             except KeyboardInterrupt:
-                console.print("\n\n[yellow]Use /exit to quit[/yellow]\n")
+                interrupt_count += 1
+                if interrupt_count >= 2:
+                    console.print("\n")
+                    break
+                console.print("\n[yellow]Press Ctrl+C again to exit[/yellow]\n")
                 continue
             except EOFError:
                 break
             except Exception as e:
                 print_error(f"Error: {str(e)}")
+                interrupt_count = 0  # Reset on other errors
                 continue
 
         print_info("Goodbye!")
