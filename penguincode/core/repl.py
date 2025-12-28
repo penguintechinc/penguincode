@@ -200,6 +200,52 @@ class REPLSession:
         else:
             print_error(result.error or "Execution failed")
 
+    async def handle_chat(self, message: str) -> None:
+        """Handle regular chat messages by sending to Ollama."""
+        from penguincode.ollama import Message
+
+        # Build conversation history for context
+        messages = [
+            Message(
+                role="system",
+                content=(
+                    f"You are PenguinCode, an AI coding assistant. "
+                    f"You are helping with a project in: {self.project_dir}\n"
+                    f"Be concise and helpful. If you need to explore files or run commands, "
+                    f"tell the user to use /explore or /execute commands."
+                ),
+            )
+        ]
+
+        # Add recent conversation history (last 10 messages)
+        for msg in self.session.messages[-10:]:
+            messages.append(Message(role=msg.role, content=msg.content))
+
+        # Stream the response
+        console.print("\n[bold blue]Assistant[/bold blue]: ", end="")
+
+        full_response = ""
+        try:
+            async for chunk in self.ollama_client.chat(
+                model=self.settings.models.orchestration,
+                messages=messages,
+                stream=True,
+            ):
+                if chunk.message and chunk.message.content:
+                    content = chunk.message.content
+                    console.print(content, end="")
+                    full_response += content
+
+            console.print("\n")
+
+            # Save assistant response to session
+            if full_response:
+                self.session.add_message("assistant", full_response)
+
+        except Exception as e:
+            console.print(f"\n[red]Error: {str(e)}[/red]\n")
+            console.print("[dim]Make sure Ollama is running: ollama serve[/dim]\n")
+
     async def run(self) -> None:
         """Run the REPL loop."""
         console.print("[bold cyan]PenguinCode Chat[/bold cyan]")
@@ -222,15 +268,9 @@ class REPLSession:
                     if not should_continue:
                         break
                 else:
-                    # Regular chat message
+                    # Regular chat message - send to Ollama
                     self.session.add_message("user", user_input)
-
-                    # For now, just echo back (TODO: implement orchestrator)
-                    console.print(
-                        f"\n[bold blue]Assistant[/bold blue]: "
-                        f"Chat mode not fully implemented yet. "
-                        f"Try /explore or /execute commands.\n"
-                    )
+                    await self.handle_chat(user_input)
 
             except KeyboardInterrupt:
                 console.print("\n\n[yellow]Use /exit to quit[/yellow]\n")
