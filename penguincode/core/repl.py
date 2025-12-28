@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from rich.prompt import Prompt
+from rich.table import Table
 
 from penguincode.agents import ChatAgent, ExecutorAgent, ExplorerAgent
 from penguincode.config.settings import Settings, load_settings
@@ -47,6 +48,12 @@ class REPLSession:
         self.chat_agent: Optional[ChatAgent] = None
         self.agents = {}
 
+        # Docs RAG components (initialized if enabled)
+        self.project_context = None
+        self.docs_fetcher = None
+        self.docs_indexer = None
+        self.context_injector = None
+
     async def __aenter__(self):
         """Async context manager entry."""
         # Initialize Ollama client
@@ -78,7 +85,70 @@ class REPLSession:
             model=explorer_model,
         )
 
+        # Initialize docs RAG if enabled
+        if self.settings.docs_rag.enabled:
+            await self._init_docs_rag()
+
         return self
+
+    async def _init_docs_rag(self) -> None:
+        """Initialize documentation RAG system."""
+        try:
+            from penguincode.docs_rag import (
+                ProjectDetector,
+                DocumentationFetcher,
+                DocumentationIndexer,
+                ContextInjector,
+            )
+
+            # Detect project languages and libraries
+            if self.settings.docs_rag.auto_detect_on_start:
+                detector = ProjectDetector(str(self.project_dir))
+                self.project_context = detector.detect()
+
+                if self.project_context.languages:
+                    langs = ", ".join(self.project_context.language_names)
+                    libs_count = len(self.project_context.libraries)
+                    print_info(f"Detected: {langs} ({libs_count} libraries)")
+
+            # Initialize fetcher and indexer
+            self.docs_fetcher = DocumentationFetcher(
+                cache_dir=self.settings.docs_rag.cache_dir,
+                max_pages_per_library=self.settings.docs_rag.max_pages_per_library,
+                cache_max_age_days=self.settings.docs_rag.cache_max_age_days,
+            )
+
+            self.docs_indexer = DocumentationIndexer(
+                collection_name=self.settings.docs_rag.collection,
+                embedding_model=self.settings.memory.embedding_model,
+                chunk_size=self.settings.docs_rag.chunk_size,
+                chunk_overlap=self.settings.docs_rag.chunk_overlap,
+                ollama_base_url=self.settings.ollama.api_url,
+            )
+
+            self.context_injector = ContextInjector(
+                indexer=self.docs_indexer,
+                max_context_tokens=self.settings.docs_rag.max_context_tokens,
+                max_chunks=self.settings.docs_rag.max_chunks_per_query,
+            )
+
+            # Cleanup expired cache entries
+            expired = self.docs_fetcher.expunge_expired()
+            if expired > 0:
+                print_info(f"Cleaned up {expired} expired doc cache entries")
+
+            # Cleanup unused library docs
+            if self.project_context:
+                removed = self.docs_fetcher.cleanup_unused_libraries(
+                    self.project_context.libraries
+                )
+                if removed:
+                    print_info(f"Removed docs for unused libraries: {', '.join(removed.keys())}")
+
+        except ImportError as e:
+            print_info(f"Docs RAG not available: {e}")
+        except Exception as e:
+            print_error(f"Docs RAG init failed: {e}")
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
@@ -126,6 +196,8 @@ class REPLSession:
             if self.chat_agent:
                 self.chat_agent.reset_conversation()
             print_info("Conversation reset")
+        elif cmd == "/docs":
+            await self.handle_docs_command(args)
         else:
             print_error(f"Unknown command: {cmd}")
             print_info("Type /help for available commands")
@@ -149,6 +221,14 @@ class REPLSession:
   /explore <query>   Explore codebase (read-only)
   /execute <task>    Execute code changes
   /read <path>       Read a file
+
+[yellow]Documentation RAG:[/yellow]
+  /docs status       Show detection and index status
+  /docs detect       Re-run project detection
+  /docs index [lib]  Index documentation (all or specific library)
+  /docs search <q>   Search indexed documentation
+  /docs clear [lib]  Clear index (all or specific library)
+  /docs cleanup      Remove docs for unused libraries
 
 [yellow]Chat:[/yellow]
   Just type your message to chat with the orchestrator.
@@ -234,6 +314,242 @@ class REPLSession:
         else:
             print_error(result.error or "Execution failed")
 
+    async def handle_docs_command(self, args: str) -> None:
+        """Handle /docs subcommands."""
+        if not self.settings.docs_rag.enabled:
+            print_error("Docs RAG is disabled in config")
+            return
+
+        parts = args.split(maxsplit=1)
+        subcmd = parts[0].lower() if parts else "status"
+        subargs = parts[1] if len(parts) > 1 else ""
+
+        if subcmd == "status":
+            await self._docs_status()
+        elif subcmd == "detect":
+            await self._docs_detect()
+        elif subcmd == "index":
+            await self._docs_index(subargs)
+        elif subcmd == "search":
+            await self._docs_search(subargs)
+        elif subcmd == "clear":
+            await self._docs_clear(subargs)
+        elif subcmd == "cleanup":
+            await self._docs_cleanup()
+        else:
+            print_error(f"Unknown docs command: {subcmd}")
+            print_info("Use: /docs status|detect|index|search|clear|cleanup")
+
+    async def _docs_status(self) -> None:
+        """Show docs RAG status."""
+        console.print("\n[bold cyan]Documentation RAG Status[/bold cyan]\n")
+
+        # Project detection
+        if self.project_context:
+            console.print("[yellow]Detected Languages:[/yellow]")
+            for lang in self.project_context.languages:
+                console.print(f"  - {lang.value}")
+
+            console.print(f"\n[yellow]Detected Libraries ({len(self.project_context.libraries)}):[/yellow]")
+            # Group by language
+            by_lang = {}
+            for lib in self.project_context.libraries[:20]:  # Show first 20
+                lang = lib.language.value
+                if lang not in by_lang:
+                    by_lang[lang] = []
+                by_lang[lang].append(lib.name)
+
+            for lang, libs in by_lang.items():
+                console.print(f"  [{lang}] {', '.join(libs[:10])}")
+                if len(libs) > 10:
+                    console.print(f"        ... and {len(libs) - 10} more")
+        else:
+            print_info("No project context (run /docs detect)")
+
+        # Index status
+        if self.docs_indexer:
+            console.print("\n[yellow]Index Status:[/yellow]")
+            status = self.docs_indexer.get_index_status()
+
+            if status["libraries"]:
+                table = Table(show_header=True)
+                table.add_column("Library")
+                table.add_column("Chunks")
+                table.add_column("Indexed")
+                table.add_column("Status")
+
+                for lib, info in status["libraries"].items():
+                    status_str = "[red]expired[/red]" if info["is_expired"] else "[green]valid[/green]"
+                    table.add_row(
+                        lib,
+                        str(info["chunk_count"]),
+                        info["indexed_at"][:10],
+                        status_str,
+                    )
+                console.print(table)
+            else:
+                print_info("No libraries indexed")
+
+            console.print(f"\nTotal chunks: {status['total_chunks']}")
+
+        # Cache status
+        if self.docs_fetcher:
+            console.print("\n[yellow]Cache Status:[/yellow]")
+            cache_stats = self.docs_fetcher.get_cache_stats()
+            console.print(f"  Valid entries: {cache_stats['valid_entries']}")
+            console.print(f"  Expired entries: {cache_stats['expired_entries']}")
+
+        console.print()
+
+    async def _docs_detect(self) -> None:
+        """Re-run project detection."""
+        from penguincode.docs_rag import ProjectDetector
+
+        detector = ProjectDetector(str(self.project_dir))
+        self.project_context = detector.detect()
+
+        console.print("\n[bold cyan]Project Detection Results[/bold cyan]\n")
+
+        if self.project_context.languages:
+            console.print("[yellow]Languages:[/yellow]")
+            for lang in self.project_context.languages:
+                console.print(f"  - {lang.value}")
+
+            console.print(f"\n[yellow]Libraries ({len(self.project_context.libraries)}):[/yellow]")
+            for lib in self.project_context.libraries[:15]:
+                version = f" ({lib.version})" if lib.version else ""
+                console.print(f"  - {lib.name}{version} [{lib.language.value}]")
+
+            if len(self.project_context.libraries) > 15:
+                console.print(f"  ... and {len(self.project_context.libraries) - 15} more")
+        else:
+            print_info("No languages or libraries detected")
+
+        console.print()
+
+    async def _docs_index(self, library_name: str = "") -> None:
+        """Index documentation for libraries."""
+        if not self.project_context:
+            print_error("Run /docs detect first")
+            return
+
+        from penguincode.docs_rag import get_priority_docs_for_project
+
+        if library_name:
+            # Index specific library
+            lib = next(
+                (l for l in self.project_context.libraries if l.name.lower() == library_name.lower()),
+                None
+            )
+            if not lib:
+                print_error(f"Library '{library_name}' not detected in project")
+                return
+
+            libs_to_index = [lib]
+        else:
+            # Index priority libraries
+            libs_to_index = get_priority_docs_for_project(
+                self.project_context.libraries,
+                self.settings.docs_rag.priority_libraries,
+                self.settings.docs_rag.max_libraries_to_index,
+            )
+
+        console.print(f"\n[cyan]Indexing {len(libs_to_index)} libraries...[/cyan]\n")
+
+        total_chunks = 0
+        for lib in libs_to_index:
+            console.print(f"  Fetching {lib.name}...")
+
+            # Fetch docs
+            docs = await self.docs_fetcher.fetch_library_docs(lib)
+
+            if docs:
+                # Index docs
+                chunks = await self.docs_indexer.index_library(lib, docs)
+                total_chunks += chunks
+                console.print(f"    Indexed {chunks} chunks")
+            else:
+                console.print(f"    [dim]No docs found[/dim]")
+
+        print_success(f"Indexed {total_chunks} total chunks")
+
+    async def _docs_search(self, query: str) -> None:
+        """Search indexed documentation."""
+        if not query:
+            print_error("Usage: /docs search <query>")
+            return
+
+        if not self.docs_indexer:
+            print_error("Docs indexer not initialized")
+            return
+
+        console.print(f"\n[cyan]Searching:[/cyan] {query}\n")
+
+        # Filter to project libraries only
+        library_names = self.project_context.library_names if self.project_context else None
+
+        results = await self.docs_indexer.search(
+            query=query,
+            libraries=library_names,
+            limit=5,
+        )
+
+        if results:
+            for i, result in enumerate(results, 1):
+                console.print(f"[bold]{i}. [{result.library}][/bold] (score: {result.relevance_score:.2f})")
+                # Truncate long content
+                content = result.content[:300] + "..." if len(result.content) > 300 else result.content
+                console.print(f"   {content}\n")
+        else:
+            print_info("No results found")
+
+    async def _docs_clear(self, library_name: str = "") -> None:
+        """Clear indexed documentation."""
+        if not self.docs_indexer:
+            print_error("Docs indexer not initialized")
+            return
+
+        if library_name:
+            count = await self.docs_indexer.clear_library_index(library_name)
+            print_success(f"Cleared {count} chunks for {library_name}")
+        else:
+            # Clear all
+            status = self.docs_indexer.get_index_status()
+            total = 0
+            for lib in list(status["libraries"].keys()):
+                count = await self.docs_indexer.clear_library_index(lib)
+                total += count
+            print_success(f"Cleared {total} total chunks")
+
+    async def _docs_cleanup(self) -> None:
+        """Remove docs for libraries no longer in project."""
+        if not self.project_context:
+            print_error("Run /docs detect first")
+            return
+
+        # Cleanup cache
+        cache_removed = self.docs_fetcher.cleanup_unused_libraries(
+            self.project_context.libraries
+        )
+
+        # Cleanup index
+        index_removed = await self.docs_indexer.cleanup_unused(
+            self.project_context.libraries,
+            self.project_context.languages,
+        )
+
+        if cache_removed or index_removed:
+            console.print("\n[cyan]Cleanup Results:[/cyan]")
+            if cache_removed:
+                for lib, count in cache_removed.items():
+                    console.print(f"  Cache: removed {count} pages for {lib}")
+            if index_removed:
+                for lib, count in index_removed.items():
+                    console.print(f"  Index: removed {count} chunks for {lib}")
+            console.print()
+        else:
+            print_info("Nothing to clean up")
+
     async def handle_chat(self, message: str) -> None:
         """
         Handle regular chat messages by sending to the chat agent.
@@ -247,8 +563,29 @@ class REPLSession:
         console.print()  # Add some spacing
 
         try:
+            # Inject documentation context if available
+            if self.context_injector and self.project_context:
+                should_inject = await self.context_injector.should_inject_context(
+                    message, self.project_context
+                )
+                if should_inject:
+                    context = await self.context_injector.get_relevant_context(
+                        message, self.project_context
+                    )
+                    if context:
+                        # Augment the chat agent's system prompt temporarily
+                        original_prompt = self.chat_agent.system_prompt
+                        self.chat_agent.system_prompt = self.context_injector.build_augmented_prompt(
+                            original_prompt, context
+                        )
+                        console.print("[dim](using documentation context)[/dim]")
+
             # Use chat agent to process the message
             response = await self.chat_agent.process(message)
+
+            # Restore original prompt if modified
+            if hasattr(self, '_original_prompt'):
+                self.chat_agent.system_prompt = self._original_prompt
 
             # Display the response
             console.print(f"\n[bold blue]Assistant:[/bold blue]")
