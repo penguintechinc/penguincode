@@ -649,10 +649,17 @@ class ChatAgent:
             return "spawn_planner"
 
         # File creation/writing patterns -> executor
+        # Check for "write/create ... file/script" pattern with anything in between
+        import re
+        if re.search(r'\b(create|write|make|add)\s+(?:a\s+)?(?:\w+\s+)?(file|script)\b', msg_lower):
+            return "spawn_executor"
+        # Check for file extension patterns like "testing.py", "hello.sh"
+        if re.search(r'\b\w+\.(py|js|ts|sh|bash|rb|go|rs|java|c|cpp|h|txt|json|yaml|yml|md|html|css)\b', msg_lower):
+            # Has a file extension mentioned - likely wants to create/edit
+            if any(kw in msg_lower for kw in ["write", "create", "make", "add", "generate"]):
+                return "spawn_executor"
         if any(kw in msg_lower for kw in [
-            "create a file", "create file", "make a file", "make file",
-            "write a file", "write file", "save to file", "save file",
-            "add a file", "new file", "touch ", "echo ",
+            "save to file", "save file", "new file", "touch ", "echo ",
         ]):
             return "spawn_executor"
 
