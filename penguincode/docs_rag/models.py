@@ -14,6 +14,8 @@ class Language(Enum):
     TYPESCRIPT = "typescript"
     GO = "go"
     RUST = "rust"
+    HCL = "hcl"  # OpenTofu/Terraform
+    ANSIBLE = "ansible"
 
 
 @dataclass
