@@ -722,7 +722,9 @@ class BaseAgent(ABC):
                     tool_calls = self._parse_tool_calls(response_text)
 
                 # If still no tool calls, try detecting intent from natural language
-                if not tool_calls:
+                # BUT only on first iteration - after that, if LLM isn't calling tools
+                # explicitly, it's likely done or confused. This prevents infinite loops.
+                if not tool_calls and iteration == 1:
                     tool_calls = self._detect_tool_intent(response_text, task)
 
                 # If we have tool calls, execute them

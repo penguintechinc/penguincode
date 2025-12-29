@@ -205,7 +205,7 @@ class REPLSession:
                 # Fetch language docs
                 docs = await self.docs_fetcher.fetch_language_docs(lang)
                 if docs:
-                    chunks = await self.docs_indexer.index_language(lang.value, docs)
+                    chunks = await self.docs_indexer.index_language(lang, docs)
                     indexed_count += chunks
                     console.print(f"[dim]  Indexed {chunks} chunks for {lang.value}[/dim]")
             except Exception as e:
@@ -248,7 +248,7 @@ class REPLSession:
         try:
             docs = await self.docs_fetcher.fetch_language_docs(lang_enum)
             if docs:
-                chunks = await self.docs_indexer.index_language(language, docs)
+                chunks = await self.docs_indexer.index_language(lang_enum, docs)
                 console.print(f"[dim]  Indexed {chunks} chunks[/dim]")
                 return True
         except Exception as e:
