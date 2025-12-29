@@ -26,7 +26,7 @@
 - 🤖 **Multi-Agent System** - ChatAgent orchestrates specialized Explorer/Executor agents
 - 🔍 **Multi-Engine Research** - 5 search engines with MCP protocol support
 - 🧠 **Persistent Memory** - mem0 integration for context across sessions
-- 📚 **Documentation RAG** - Auto-indexes docs for your project's languages and libraries
+- 📚 **Documentation RAG** - Auto-detects your project's languages and libraries, fetches official documentation, and uses it for accurate, syntax-correct answers
 - 🔌 **MCP Integration** - Extend with N8N, Flowise, and custom MCP servers
 - 🌐 **Client-Server Mode** - gRPC server for remote Ollama and team deployments
 - ⚡ **GPU Optimized** - Smart model switching for RTX 4060 Ti (8GB VRAM) or higher
@@ -77,6 +77,7 @@ See [Architecture Documentation](docs/ARCHITECTURE.md) for remote deployment wit
 ## Documentation
 
 - **[Usage Guide](docs/USAGE.md)** - Installation, configuration, and usage
+- **[Configuration Reference](docs/CONFIGURATION.md)** - Complete config.yaml reference
 - **[Architecture](docs/ARCHITECTURE.md)** - Client-server architecture and deployment modes
 - **[Agent Architecture](docs/AGENTS.md)** - ChatAgent, Explorer, Executor, Planner
 - **[Tool Support](docs/TOOL_SUPPORT.md)** - Ollama models with native tool calling
