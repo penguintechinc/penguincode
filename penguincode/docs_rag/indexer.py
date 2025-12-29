@@ -58,6 +58,48 @@ class DocumentationIndexer:
         with open(self.metadata_path, "w") as f:
             json.dump(self.index_metadata, f, indent=2)
 
+    def is_language_indexed(self, language: str, max_age_days: int = 7) -> bool:
+        """Check if a language's documentation is indexed and fresh.
+
+        Args:
+            language: Language name (e.g., "python")
+            max_age_days: Maximum age in days before considered stale
+
+        Returns:
+            True if indexed and fresh
+        """
+        lang_key = language.lower()
+        if lang_key not in self.index_metadata.get("languages", {}):
+            return False
+
+        existing = self.index_metadata["languages"][lang_key]
+        try:
+            indexed_at = datetime.fromisoformat(existing["indexed_at"])
+            return datetime.now() - indexed_at < timedelta(days=max_age_days)
+        except (KeyError, ValueError):
+            return False
+
+    def is_library_indexed(self, library: str, max_age_days: int = 7) -> bool:
+        """Check if a library's documentation is indexed and fresh.
+
+        Args:
+            library: Library name (e.g., "fastapi")
+            max_age_days: Maximum age in days before considered stale
+
+        Returns:
+            True if indexed and fresh
+        """
+        lib_key = library.lower()
+        if lib_key not in self.index_metadata.get("libraries", {}):
+            return False
+
+        existing = self.index_metadata["libraries"][lib_key]
+        try:
+            indexed_at = datetime.fromisoformat(existing["indexed_at"])
+            return datetime.now() - indexed_at < timedelta(days=max_age_days)
+        except (KeyError, ValueError):
+            return False
+
     def _get_collection(self):
         """Get or create ChromaDB collection."""
         if self._collection is not None:

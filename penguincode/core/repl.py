@@ -107,17 +107,36 @@ class REPLSession:
                 DocumentationFetcher,
                 DocumentationIndexer,
                 ContextInjector,
+                Language,
+                ProjectContext,
             )
 
-            # Detect project languages and libraries
+            # Start with manual languages from config
+            manual_languages = []
+            for lang_name, enabled in self.settings.docs_rag.languages_manual.items():
+                if enabled:
+                    try:
+                        manual_languages.append(Language(lang_name.lower()))
+                    except ValueError:
+                        print_error(f"Unknown language in config: {lang_name}")
+
+            # Auto-detect project languages if enabled
             if self.settings.docs_rag.auto_detect_on_start:
                 detector = ProjectDetector(str(self.project_dir))
                 self.project_context = detector.detect()
+
+                # Merge manual languages with detected ones
+                for lang in manual_languages:
+                    if lang not in self.project_context.languages:
+                        self.project_context.languages.append(lang)
 
                 if self.project_context.languages:
                     langs = ", ".join(self.project_context.language_names)
                     libs_count = len(self.project_context.libraries)
                     print_info(f"Detected: {langs} ({libs_count} libraries)")
+            else:
+                # Use only manual languages
+                self.project_context = ProjectContext(languages=manual_languages)
 
             # Initialize fetcher and indexer
             self.docs_fetcher = DocumentationFetcher(
@@ -153,10 +172,89 @@ class REPLSession:
                 if removed:
                     print_info(f"Removed docs for unused libraries: {', '.join(removed.keys())}")
 
+            # Auto-index on detect if enabled
+            if self.settings.docs_rag.auto_index_on_detect and self.project_context:
+                await self._auto_index_languages()
+
         except ImportError as e:
             print_info(f"Docs RAG not available: {e}")
         except Exception as e:
             print_error(f"Docs RAG init failed: {e}")
+
+    async def _auto_index_languages(self) -> None:
+        """Auto-index documentation for detected/configured languages."""
+        if not self.project_context or not self.docs_fetcher or not self.docs_indexer:
+            return
+
+        from penguincode.docs_rag import get_language_doc_source
+
+        indexed_count = 0
+        for lang in self.project_context.languages:
+            # Check if already indexed (fresh)
+            if self.docs_indexer.is_language_indexed(lang.value):
+                continue
+
+            # Get doc source for language
+            doc_source = get_language_doc_source(lang)
+            if not doc_source:
+                continue
+
+            console.print(f"[dim]Indexing {lang.value} documentation...[/dim]")
+
+            try:
+                # Fetch language docs
+                docs = await self.docs_fetcher.fetch_language_docs(lang)
+                if docs:
+                    chunks = await self.docs_indexer.index_language(lang.value, docs)
+                    indexed_count += chunks
+                    console.print(f"[dim]  Indexed {chunks} chunks for {lang.value}[/dim]")
+            except Exception as e:
+                console.print(f"[dim]  Failed to index {lang.value}: {e}[/dim]")
+
+        if indexed_count > 0:
+            print_info(f"Auto-indexed {indexed_count} documentation chunks")
+
+    async def _ensure_language_indexed(self, language: str) -> bool:
+        """Ensure a language's documentation is indexed (on-demand).
+
+        Args:
+            language: Language name (e.g., "python", "javascript")
+
+        Returns:
+            True if indexed successfully or already indexed
+        """
+        if not self.docs_fetcher or not self.docs_indexer:
+            return False
+
+        from penguincode.docs_rag import Language, get_language_doc_source
+
+        # Check if already indexed
+        if self.docs_indexer.is_language_indexed(language):
+            return True
+
+        # Get Language enum
+        try:
+            lang_enum = Language(language.lower())
+        except ValueError:
+            return False
+
+        # Get doc source
+        doc_source = get_language_doc_source(lang_enum)
+        if not doc_source:
+            return False
+
+        console.print(f"[dim]Indexing {language} documentation on-demand...[/dim]")
+
+        try:
+            docs = await self.docs_fetcher.fetch_language_docs(lang_enum)
+            if docs:
+                chunks = await self.docs_indexer.index_language(language, docs)
+                console.print(f"[dim]  Indexed {chunks} chunks[/dim]")
+                return True
+        except Exception as e:
+            console.print(f"[dim]  Failed: {e}[/dim]")
+
+        return False
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
@@ -558,6 +656,35 @@ class REPLSession:
         else:
             print_info("Nothing to clean up")
 
+    def _detect_languages_in_message(self, message: str) -> list:
+        """Detect programming languages mentioned in user message.
+
+        Args:
+            message: User's message
+
+        Returns:
+            List of detected language names
+        """
+        msg_lower = message.lower()
+        detected = []
+
+        # Language patterns to detect
+        language_patterns = {
+            "python": ["python", "py ", ".py", "pip ", "pytest", "django", "flask", "fastapi"],
+            "javascript": ["javascript", "js ", ".js", "node", "npm ", "react", "vue", "express"],
+            "typescript": ["typescript", "ts ", ".ts", ".tsx"],
+            "go": [" go ", "golang", ".go", "go mod", "go build"],
+            "rust": ["rust", ".rs", "cargo ", "rustc"],
+            "hcl": ["terraform", "opentofu", "tofu ", ".tf", "hcl"],
+            "ansible": ["ansible", "playbook", "ansible-playbook", ".yml playbook", ".yaml playbook"],
+        }
+
+        for lang, patterns in language_patterns.items():
+            if any(p in msg_lower for p in patterns):
+                detected.append(lang)
+
+        return detected
+
     async def handle_chat(self, message: str) -> None:
         """
         Handle regular chat messages by sending to the chat agent.
@@ -571,6 +698,12 @@ class REPLSession:
         console.print()  # Add some spacing
 
         try:
+            # On-demand language detection and indexing
+            if self.settings.docs_rag.auto_detect_on_request and self.settings.docs_rag.auto_index_on_request:
+                detected_langs = self._detect_languages_in_message(message)
+                for lang in detected_langs:
+                    await self._ensure_language_indexed(lang)
+
             # Inject documentation context if available
             if self.context_injector and self.project_context:
                 should_inject = await self.context_injector.should_inject_context(

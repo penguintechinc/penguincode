@@ -219,7 +219,21 @@ class DocsRagConfig:
     max_chunks_per_query: int = 5
     # Behavior settings
     auto_detect_on_start: bool = True
+    auto_detect_on_request: bool = True  # Detect languages from request content
     auto_index_on_detect: bool = False  # Require explicit /docs index
+    auto_index_on_request: bool = True  # Index on-demand when docs needed
+    # Manual language configuration (dict of language -> bool)
+    languages_manual: dict = field(default_factory=lambda: {
+        "python": False,
+        "javascript": False,
+        "typescript": False,
+        "go": False,
+        "rust": False,
+        "hcl": False,      # Terraform/OpenTofu
+        "ansible": False,
+    })
+    # User-specified libraries to always index (e.g., ["fastapi", "pytest"])
+    libraries_manual: list = field(default_factory=list)
     # Library priority - index these first if detected
     priority_libraries: list = field(default_factory=lambda: [
         # Python
@@ -325,6 +339,12 @@ class Settings:
     @staticmethod
     def _parse_docs_rag_config(data: Dict[str, Any]) -> DocsRagConfig:
         """Parse documentation RAG configuration."""
+        # Parse languages_manual dict
+        default_langs = DocsRagConfig().languages_manual
+        languages_manual = data.get("languages_manual", default_langs)
+        if not isinstance(languages_manual, dict):
+            languages_manual = default_langs
+
         return DocsRagConfig(
             enabled=data.get("enabled", True),
             cache_dir=data.get("cache_dir", "./.penguincode/docs"),
@@ -337,7 +357,11 @@ class Settings:
             max_context_tokens=data.get("max_context_tokens", 2000),
             max_chunks_per_query=data.get("max_chunks_per_query", 5),
             auto_detect_on_start=data.get("auto_detect_on_start", True),
+            auto_detect_on_request=data.get("auto_detect_on_request", True),
             auto_index_on_detect=data.get("auto_index_on_detect", False),
+            auto_index_on_request=data.get("auto_index_on_request", True),
+            languages_manual=languages_manual,
+            libraries_manual=data.get("libraries_manual", []),
             priority_libraries=data.get("priority_libraries", DocsRagConfig().priority_libraries),
         )
 

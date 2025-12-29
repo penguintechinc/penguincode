@@ -117,6 +117,38 @@ regulators:
   min_request_interval_ms: 100
   cooldown_after_error_ms: 1000
 
+# Documentation RAG (auto-indexing of language/library docs)
+docs_rag:
+  enabled: true
+  auto_detect_on_start: true    # Detect languages from project files at startup
+  auto_detect_on_request: true  # Detect languages from request content (overrides manual)
+  auto_index_on_detect: true    # Index docs when languages detected
+  auto_index_on_request: true   # Index docs on-demand when needed for a request
+
+  # Manual language configuration (used when auto_detect is false or as baseline)
+  # Auto-detect will add to these, not replace them
+  # Set to true to always index docs for a language even if not detected
+  languages_manual:
+    python: false
+    javascript: false
+    typescript: false
+    go: false
+    rust: false
+    hcl: false        # Terraform/OpenTofu
+    ansible: false
+
+  # User-specified libraries to always index
+  libraries_manual: []
+    # - fastapi
+    # - pytest
+    # - numpy
+
+  # Cache and indexing settings
+  cache_dir: "./.penguincode/docs"
+  cache_max_age_days: 7
+  max_pages_per_library: 50
+  max_libraries_to_index: 20
+
 # Optional: Hosted Ollama usage API (for quota tracking)
 usage_api:
   enabled: false
