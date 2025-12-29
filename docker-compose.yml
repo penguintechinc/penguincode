@@ -1,0 +1,57 @@
+# PenguinCode Docker Compose
+#
+# Usage:
+#   docker compose up                    # Start server only
+#   docker compose --profile with-ollama up  # Start with bundled Ollama
+#
+# Environment variables:
+#   JWT_SECRET - Secret for JWT token signing (required for auth)
+#   PENGUINCODE_API_KEY - API key for client authentication
+
+services:
+  # PenguinCode gRPC Server
+  penguincode-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "50051:50051"
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal}
+      - PENGUINCODE_JWT_SECRET=${JWT_SECRET:-}
+      - PENGUINCODE_API_KEY=${PENGUINCODE_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Mount config file if present
+      - ./config.yaml:/app/config.yaml:ro
+      # Persist memory/cache data
+      - penguincode-data:/app/.penguincode
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Bundled Ollama instance
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    profiles:
+      - with-ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  penguincode-data:
+  ollama-models:

@@ -238,6 +238,49 @@ class MCPConfig:
 
 
 @dataclass
+class ServerConfig:
+    """gRPC server configuration for client-server mode.
+
+    Modes:
+    - local: In-process execution (default, current behavior)
+    - standalone: gRPC server on localhost
+    - remote: gRPC server on remote host with JWT auth
+    """
+
+    mode: str = "local"  # local | standalone | remote
+    host: str = "localhost"
+    port: int = 50051
+    tls_enabled: bool = False
+    tls_cert_path: str = ""
+    tls_key_path: str = ""
+
+
+@dataclass
+class AuthConfig:
+    """Authentication configuration for remote server mode.
+
+    Used when server.mode is 'remote' or when running as a standalone server.
+    """
+
+    enabled: bool = False
+    jwt_secret: str = ""  # Server-side secret for signing tokens
+    token_expiry: int = 3600  # Token expiry in seconds (1 hour)
+    refresh_expiry: int = 86400  # Refresh token expiry (24 hours)
+    api_keys: list = field(default_factory=list)  # Valid API keys for authentication
+
+
+@dataclass
+class ClientConfig:
+    """Client configuration for remote server connections."""
+
+    server_url: str = ""  # Remote server URL (e.g., "grpc://server:50051")
+    token_path: str = "~/.penguincode/token"  # Where to store JWT token
+    local_tools: list = field(default_factory=lambda: [
+        "read", "write", "edit", "bash", "grep", "glob"
+    ])  # Tools that execute locally on client
+
+
+@dataclass
 class DocsRagConfig:
     """Documentation RAG configuration.
 
@@ -306,6 +349,10 @@ class Settings:
     usage_api: UsageAPIConfig = field(default_factory=UsageAPIConfig)
     docs_rag: DocsRagConfig = field(default_factory=DocsRagConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
+    # Client-server architecture
+    server: ServerConfig = field(default_factory=ServerConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
+    client: ClientConfig = field(default_factory=ClientConfig)
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "Settings":
@@ -332,6 +379,9 @@ class Settings:
             usage_api=UsageAPIConfig(**data.get("usage_api", {})),
             docs_rag=cls._parse_docs_rag_config(data.get("docs_rag", {})),
             mcp=cls._parse_mcp_config(data.get("mcp", {})),
+            server=cls._parse_server_config(data.get("server", {})),
+            auth=cls._parse_auth_config(data.get("auth", {})),
+            client=cls._parse_client_config(data.get("client", {})),
         )
 
     @staticmethod
@@ -432,6 +482,39 @@ class Settings:
         return MCPConfig(
             enabled=data.get("enabled", True),
             servers=servers,
+        )
+
+    @staticmethod
+    def _parse_server_config(data: Dict[str, Any]) -> ServerConfig:
+        """Parse server configuration."""
+        return ServerConfig(
+            mode=data.get("mode", "local"),
+            host=data.get("host", "localhost"),
+            port=data.get("port", 50051),
+            tls_enabled=data.get("tls_enabled", False),
+            tls_cert_path=data.get("tls_cert_path", ""),
+            tls_key_path=data.get("tls_key_path", ""),
+        )
+
+    @staticmethod
+    def _parse_auth_config(data: Dict[str, Any]) -> AuthConfig:
+        """Parse authentication configuration."""
+        return AuthConfig(
+            enabled=data.get("enabled", False),
+            jwt_secret=data.get("jwt_secret", ""),
+            token_expiry=data.get("token_expiry", 3600),
+            refresh_expiry=data.get("refresh_expiry", 86400),
+            api_keys=data.get("api_keys", []),
+        )
+
+    @staticmethod
+    def _parse_client_config(data: Dict[str, Any]) -> ClientConfig:
+        """Parse client configuration."""
+        default_tools = ["read", "write", "edit", "bash", "grep", "glob"]
+        return ClientConfig(
+            server_url=data.get("server_url", ""),
+            token_path=data.get("token_path", "~/.penguincode/token"),
+            local_tools=data.get("local_tools", default_tools),
         )
 
 

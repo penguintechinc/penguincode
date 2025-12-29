@@ -206,3 +206,34 @@ mcp:
     #   url: "http://localhost:3000/api/v1/mcp"
     #   headers:
     #     Authorization: "Bearer ${FLOWISE_API_KEY}"
+
+# Server Configuration (Client-Server Mode)
+# Modes: local (default), standalone (gRPC on localhost), remote (gRPC with auth)
+server:
+  mode: "local"           # local | standalone | remote
+  host: "localhost"       # Server bind address
+  port: 50051             # gRPC port
+  tls_enabled: false      # Enable TLS for secure connections
+  tls_cert_path: ""       # Path to TLS certificate
+  tls_key_path: ""        # Path to TLS private key
+
+# Authentication (for remote server mode)
+auth:
+  enabled: false          # Enable JWT authentication
+  jwt_secret: "${PENGUINCODE_JWT_SECRET}"
+  token_expiry: 3600      # Access token expiry in seconds (1 hour)
+  refresh_expiry: 86400   # Refresh token expiry (24 hours)
+  api_keys:               # Valid API keys for authentication
+    - "${PENGUINCODE_API_KEY}"
+
+# Client Configuration (for connecting to remote servers)
+client:
+  server_url: ""                    # Remote server URL (e.g., "grpc://server:50051")
+  token_path: "~/.penguincode/token"  # Where to store JWT token
+  local_tools:                      # Tools that execute locally on client
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - glob
