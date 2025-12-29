@@ -570,24 +570,32 @@ class ChatAgent:
 
         return tool_calls
 
-    async def _call_llm(self, messages: List[Message], use_tools: bool = True) -> Tuple[str, List[Dict]]:
+    async def _call_llm(self, messages: List[Message], use_tools: bool = True, timeout: float = 60.0) -> Tuple[str, List[Dict]]:
         """Call the LLM and return response text and tool calls."""
         response_text = ""
         tool_calls = []
 
-        async for chunk in self.client.chat(
-            model=self.model,
-            messages=messages,
-            tools=AGENT_TOOLS if use_tools else None,
-            stream=True,
-        ):
-            if chunk.message and chunk.message.content:
-                response_text += chunk.message.content
+        try:
+            async with asyncio.timeout(timeout):
+                async for chunk in self.client.chat(
+                    model=self.model,
+                    messages=messages,
+                    tools=AGENT_TOOLS if use_tools else None,
+                    stream=True,
+                ):
+                    if chunk.message and chunk.message.content:
+                        response_text += chunk.message.content
 
-            if chunk.done and hasattr(chunk, "message"):
-                msg = chunk.message
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    tool_calls.extend(msg.tool_calls)
+                    if chunk.done and hasattr(chunk, "message"):
+                        msg = chunk.message
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            tool_calls.extend(msg.tool_calls)
+        except asyncio.TimeoutError:
+            console.print("[yellow]LLM response timed out[/yellow]")
+            return "", []
+        except Exception as e:
+            console.print(f"[red]LLM error: {e}[/red]")
+            return "", []
 
         # Try parsing tool calls from text if none structured
         if not tool_calls:
@@ -788,11 +796,14 @@ class ChatAgent:
         messages.extend(self.conversation_history[-10:])
         messages.append(Message(role="user", content=user_message))
 
-        console.print("[dim]Thinking...[/dim]", end="\r")
+        console.print("[dim]Routing request...[/dim]")
 
         try:
             response_text, tool_calls = await self._call_llm(messages)
-            console.print("            ", end="\r")
+
+            # Debug: show what we got back
+            if response_text:
+                console.print(f"[dim]LLM response: {response_text[:100]}{'...' if len(response_text) > 100 else ''}[/dim]")
 
             # If no tool calls from LLM, try to detect intent from user message
             if not tool_calls:
