@@ -1,104 +1,157 @@
-# MCP (Model Context Protocol) Integration
-
-PenguinCode supports MCP servers, allowing you to extend its capabilities with additional tools and integrations. MCP is an open protocol that enables AI assistants to interact with external services.
+# Model Context Protocol (MCP) Integration Guide
 
 ## What is MCP?
 
-[Model Context Protocol](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external data sources and tools. It allows:
+The **Model Context Protocol (MCP)** is a standardized, open protocol for connecting AI systems to external data sources and tools. MCP enables PenguinCode to extend its capabilities by integrating with specialized services without embedding them directly.
 
-- Adding custom tools to your AI assistant
-- Connecting to external APIs and services
-- Integrating with workflow automation platforms
-- Extending functionality without modifying core code
+**Key benefits:**
+- **Modular architecture**: Tools run as independent processes
+- **Protocol-agnostic**: Supports stdio and HTTP transports
+- **Scalable**: Add new tools without modifying core code
+- **Flexible**: Mix specialized and custom tools seamlessly
 
-## Supported Transport Types
+Learn more: https://modelcontextprotocol.io/
 
-PenguinCode supports two MCP transport types:
+## How PenguinCode Uses MCP
 
-### 1. stdio (Standard I/O)
+PenguinCode extends functionality through MCP servers that provide specialized tools:
 
-The server runs as a subprocess and communicates via stdin/stdout.
-
-```yaml
-mcp:
-  servers:
-    - name: "duckduckgo"
-      transport: "stdio"
-      command: "npx"
-      args: ["-y", "@nickclyde/duckduckgo-mcp-server"]
+```
+PenguinCode ─────┬─────→ DuckDuckGo (Search)
+                 ├─────→ SearXNG (Meta-search)
+                 ├─────→ N8N (Workflow automation)
+                 ├─────→ Flowise (AI workflows)
+                 └─────→ Custom Servers
 ```
 
-**Use when:**
-- Running official MCP server packages (npm, pip)
-- Local development
-- No persistent server needed
+**Core components:**
+- `MCPClient`: Stdio-based communication (subprocess)
+- `HTTPMCPClient`: HTTP-based communication (remote services)
+- Tool discovery and invocation
+- Automatic lifecycle management
 
-### 2. HTTP
+## Configuration in config.yaml
 
-Connects to an HTTP endpoint that implements the MCP protocol.
+Enable MCP and configure servers:
+
+```yaml
+mcp:
+  enabled: true              # Master enable/disable
+  servers: []                # List of server configurations
+```
+
+### Server Configuration Schema
 
 ```yaml
 mcp:
   servers:
-    - name: "my-server"
-      transport: "http"
-      url: "http://localhost:8080"
-      headers:
+    - name: "unique-id"           # Server identifier
+      transport: "stdio"           # "stdio" or "http"
+
+      # Stdio transport properties
+      command: "npx"               # Executable to run
+      args: ["-y", "package"]      # Command arguments
+      env:                         # Environment variables
+        VAR_NAME: "${ENV_VAR}"
+      timeout: 30                  # Request timeout (seconds)
+
+      # HTTP transport properties
+      url: "http://localhost:8080" # Server URL
+      headers:                     # HTTP headers (auth, custom)
         Authorization: "Bearer ${API_TOKEN}"
+      timeout: 30                  # Request timeout (seconds)
 ```
 
-**Use when:**
-- Connecting to hosted services
-- Authentication is required
-- Server needs to persist across sessions
+## Supported Transports
 
-## Configuration
+### Stdio Transport
 
-Add MCP servers in your `config.yaml`:
+Command-line servers communicating via stdin/stdout using JSON-RPC.
 
+**Characteristics:**
+- Automatic server startup/shutdown
+- Built-in process lifecycle management
+- No network overhead
+- JSON-RPC 2.0 protocol
+
+**When to use:**
+- Official npm/pip MCP packages
+- Local development
+- Ephemeral server needs
+
+**Example:**
+```yaml
+- name: "duckduckgo"
+  transport: "stdio"
+  command: "npx"
+  args: ["-y", "@nickclyde/duckduckgo-mcp-server"]
+  timeout: 30
+```
+
+### HTTP Transport
+
+HTTP endpoint-based servers with REST-like interface.
+
+**Characteristics:**
+- Server independence
+- Network transparency
+- Custom authentication support
+- Persistent across sessions
+
+**When to use:**
+- Hosted services (N8N, Flowise)
+- Custom HTTP servers
+- Authentication required
+- Server must persist
+
+**Example:**
+```yaml
+- name: "custom-api"
+  transport: "http"
+  url: "http://localhost:8080"
+  headers:
+    Authorization: "Bearer ${API_TOKEN}"
+  timeout: 30
+```
+
+## Example: DuckDuckGo Search via MCP
+
+Search engine integration using stdio MCP server.
+
+**Configuration:**
 ```yaml
 mcp:
   enabled: true
-  servers:
-    - name: "server-name"        # Unique identifier
-      enabled: true              # Toggle server on/off
-      transport: "stdio"         # "stdio" or "http"
-
-      # For stdio transport:
-      command: "npx"             # Command to run
-      args: ["-y", "package"]    # Command arguments
-      env:                       # Environment variables
-        API_KEY: "${MY_API_KEY}"
-      startup_timeout: 10        # Seconds to wait for startup
-
-      # For HTTP transport:
-      url: "http://localhost:8080"
-      headers:                   # HTTP headers
-        Authorization: "Bearer ${TOKEN}"
-
-      timeout: 30                # Request timeout (seconds)
-```
-
-## Example Configurations
-
-### DuckDuckGo Search
-
-```yaml
-mcp:
   servers:
     - name: "duckduckgo"
       transport: "stdio"
       command: "npx"
       args: ["-y", "@nickclyde/duckduckgo-mcp-server"]
       timeout: 30
+
+research:
+  engine: "duckduckgo"
+  use_mcp: true
+  max_results: 5
 ```
 
-**Install:** Requires Node.js
+**Implementation details** (see `tools/engines/duckduckgo_mcp.py`):
+1. Initializes `MCPClient` with server command
+2. Starts subprocess on first search
+3. Calls `duckduckgo_search` tool via JSON-RPC
+4. Parses results into `SearchResult` objects
+5. Manages process lifecycle
 
-### SearXNG Meta-Search
+**Requirements:** Node.js installed
 
+## Example: SearXNG Search via MCP
+
+Privacy-focused meta-search aggregating multiple providers.
+
+**Configuration:**
 ```yaml
 mcp:
+  enabled: true
   servers:
     - name: "searxng"
       transport: "stdio"
@@ -107,14 +160,35 @@ mcp:
       env:
         SEARXNG_URL: "https://searx.be"
       timeout: 30
+
+research:
+  engine: "searxng"
+  use_mcp: true
+  engines:
+    searxng:
+      url: "https://searx.be"
+      categories: ["general"]
 ```
 
-**Install:** Requires Python and `uvx` (from `uv`)
+**Implementation** (see `tools/engines/searxng_mcp.py`):
+- Configurable SearXNG instance URL
+- Supports multiple search categories
+- Safe search enabled by default
+- Environment variable configuration
 
-### N8N Workflow Automation
+**Requirements:** Python with `uv` package manager
 
-[N8N](https://n8n.io/) is a workflow automation tool. When configured with MCP support:
+## Example: N8N Workflow Automation
 
+Integrate N8N for complex multi-step automation.
+
+**Setup:**
+```bash
+npm install -g n8n
+n8n start      # Runs on localhost:5678
+```
+
+**Configuration:**
 ```yaml
 mcp:
   servers:
@@ -126,15 +200,34 @@ mcp:
       timeout: 60
 ```
 
+**Environment:**
+```bash
+export N8N_API_KEY="your-api-key-from-n8n-ui"
+```
+
 **Use cases:**
-- Trigger automated workflows from PenguinCode
-- Connect to external APIs through N8N nodes
-- Execute complex multi-step automations
+- Email automation (send, parse)
+- Database operations (insert, update, query)
+- Slack/Teams notifications
+- Data transformations
+- Webhook integrations
 
-### Flowise AI
+**Tool pattern:**
+```
+PenguinCode → N8N MCP Endpoint → N8N Workflows → External APIs
+```
 
-[Flowise](https://flowiseai.com/) is a visual AI workflow builder:
+## Example: Flowise AI Workflow Integration
 
+Visual AI workflow builder for specialized chains.
+
+**Setup:**
+```bash
+npm install -g flowise
+flowise start  # Runs on localhost:3000
+```
+
+**Configuration:**
 ```yaml
 mcp:
   servers:
@@ -146,135 +239,301 @@ mcp:
       timeout: 60
 ```
 
-**Use cases:**
-- Call pre-built AI chains from PenguinCode
-- Use specialized embedding or retrieval flows
-- Integrate with LangChain-based tools
+**Environment:**
+```bash
+export FLOWISE_API_KEY="key-from-flowise-settings"
+```
 
-### Custom MCP Server
+**Capabilities:**
+- Chain multiple LLMs (cascading)
+- Retrieval-augmented generation (RAG)
+- Custom prompt engineering
+- Memory and conversation history
+- Multi-turn interactions
 
-Build your own MCP server:
+## Example: Custom HTTP MCP Server with Auth
 
+Build a custom HTTP server with Bearer token authentication.
+
+**FastAPI server example:**
+```python
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthCredential
+
+app = FastAPI()
+security = HTTPBearer()
+
+async def verify_token(credentials: HTTPAuthCredential = Depends(security)):
+    if credentials.credentials != "${EXPECTED_TOKEN}":
+        raise HTTPException(status_code=403, detail="Invalid token")
+    return credentials
+
+@app.post("/tools/call")
+async def call_tool(request: dict, _=Depends(verify_token)):
+    tool_name = request["name"]
+    arguments = request["arguments"]
+
+    if tool_name == "my_tool":
+        result = process_tool(arguments)
+        return {"result": result}
+
+    return {"error": "Unknown tool"}
+
+@app.get("/tools/list")
+async def list_tools(_=Depends(verify_token)):
+    return {
+        "tools": [
+            {
+                "name": "my_tool",
+                "description": "Custom tool",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}}
+                }
+            }
+        ]
+    }
+```
+
+**PenguinCode config:**
 ```yaml
 mcp:
   servers:
-    - name: "custom"
+    - name: "custom-server"
       transport: "http"
-      url: "http://localhost:8000"
+      url: "http://localhost:8080"
       headers:
-        Authorization: "Bearer ${CUSTOM_API_KEY}"
-        X-Custom-Header: "value"
+        Authorization: "Bearer ${CUSTOM_MCP_TOKEN}"
       timeout: 30
 ```
 
-## Environment Variables
-
-All configuration values support environment variable substitution:
-
-```yaml
-mcp:
-  servers:
-    - name: "secure-server"
-      url: "${MCP_SERVER_URL}"        # From environment
-      headers:
-        Authorization: "Bearer ${MCP_TOKEN}"
-```
-
-Set environment variables:
-
+**Environment:**
 ```bash
-# Linux/macOS
-export MCP_SERVER_URL="https://api.example.com/mcp"
-export MCP_TOKEN="your-secret-token"
-
-# Windows PowerShell
-$env:MCP_SERVER_URL="https://api.example.com/mcp"
-$env:MCP_TOKEN="your-secret-token"
+export CUSTOM_MCP_TOKEN="secure-bearer-token"
 ```
 
-## Authentication Methods
+## Creating Custom MCP Servers
 
-### Bearer Token (HTTP)
+### Stdio Server Template
 
-```yaml
-headers:
-  Authorization: "Bearer ${API_TOKEN}"
+JSON-RPC 2.0 server reading from stdin, writing to stdout.
+
+```python
+import json
+import sys
+
+def list_tools():
+    """Return available tools."""
+    return {
+        "tools": [
+            {
+                "name": "my_tool",
+                "description": "Does something useful",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                }
+            }
+        ]
+    }
+
+def call_tool(name, arguments):
+    """Execute tool."""
+    if name == "my_tool":
+        return {"result": f"Processed: {arguments['query']}"}
+    return {"error": f"Unknown tool: {name}"}
+
+def handle_request(request):
+    """Handle JSON-RPC request."""
+    method = request.get("method")
+
+    if method == "tools/list":
+        return {"id": request["id"], "result": list_tools()}
+
+    if method == "tools/call":
+        name = request["params"]["name"]
+        args = request["params"]["arguments"]
+        return {"id": request["id"], "result": call_tool(name, args)}
+
+    return {"id": request.get("id"), "error": "Unknown method"}
+
+# Main loop
+for line in sys.stdin:
+    request = json.loads(line)
+    response = handle_request(request)
+    print(json.dumps(response))
 ```
 
-### API Key Header (HTTP)
+### HTTP Server Template
 
-```yaml
-headers:
-  X-API-Key: "${API_KEY}"
+FastAPI-based MCP HTTP server.
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/tools/list")
+async def list_tools():
+    return {
+        "tools": [
+            {
+                "name": "my_tool",
+                "description": "Does something useful",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}}
+                }
+            }
+        ]
+    }
+
+@app.post("/tools/call")
+async def call_tool(request: dict):
+    tool_name = request["name"]
+    arguments = request["arguments"]
+
+    if tool_name == "my_tool":
+        return {"result": f"Processed: {arguments['query']}"}
+
+    return {"error": f"Unknown tool: {tool_name}"}
 ```
 
-### Environment Variable (stdio)
+### Best Practices
 
-```yaml
-env:
-  API_KEY: "${MY_API_KEY}"
-  SECRET: "${MY_SECRET}"
+1. **Implement both endpoints:**
+   - `tools/list`: Return available tool definitions
+   - `tools/call`: Execute tool with arguments
+
+2. **Tool definitions:**
+   - Include name, description, inputSchema
+   - Provide clear error messages
+   - Document all parameters
+
+3. **Error handling:**
+   - Catch exceptions gracefully
+   - Return proper error responses
+   - Include debugging information
+
+4. **Performance:**
+   - Keep requests <30 seconds
+   - Implement timeouts for long operations
+   - Consider caching results
+
+5. **Authentication:**
+   - Validate credentials on every request
+   - Use environment variables for secrets
+   - Support multiple auth methods
+
+## Troubleshooting MCP Connections
+
+### Server Fails to Start (Stdio)
+
+**Error:** "MCP server not started"
+
+**Solutions:**
+```bash
+# Verify command exists
+npx -y @nickclyde/duckduckgo-mcp-server --help
+
+# Check Node.js installation
+node --version
+
+# Check Python for uvx-based servers
+python3 --version
+uv --version
 ```
-
-### Basic Auth (HTTP)
-
-```yaml
-headers:
-  Authorization: "Basic ${BASE64_CREDENTIALS}"
-```
-
-## Troubleshooting
-
-### Server Not Starting (stdio)
-
-1. Check command is installed: `which npx` or `which uvx`
-2. Increase `startup_timeout` if server is slow to start
-3. Check environment variables are set
 
 ### Connection Refused (HTTP)
 
-1. Verify server is running: `curl http://localhost:8080/health`
-2. Check URL and port configuration
-3. Verify network/firewall settings
+**Error:** "Connection refused" or "Network unreachable"
 
-### Authentication Errors
+**Solutions:**
+```bash
+# Verify server is running
+curl -v http://localhost:8080/tools/list
 
-1. Verify environment variables are set
-2. Check token/API key is valid
-3. Ensure headers are properly formatted
+# Check port is accessible
+netstat -tuln | grep 8080
+
+# Restart server
+pkill -f "n8n\|flowise"
+```
+
+### Authentication Failures
+
+**Error:** "403 Forbidden" or "401 Unauthorized"
+
+**Solutions:**
+```bash
+# Verify token is set
+echo $CUSTOM_MCP_TOKEN
+
+# Test with curl
+curl -H "Authorization: Bearer $CUSTOM_MCP_TOKEN" http://localhost:8080/tools/list
+
+# Check header format is correct (Bearer prefix, space)
+```
 
 ### Timeout Errors
 
-1. Increase `timeout` value
-2. Check server is responding
-3. Verify network connectivity
+**Error:** "Request timeout" or "Tool call timeout"
 
-## Building MCP Servers
+**Solutions:**
+```yaml
+# Increase timeout in config
+mcp:
+  servers:
+    - name: "slow-server"
+      timeout: 60  # Increase from default 30
+```
 
-To build your own MCP server:
+```bash
+# Check server logs
+docker logs flowise  # or relevant container
+```
 
-1. **Python**: Use the `mcp` package
-   ```bash
-   pip install mcp
-   ```
+### Tool Call Failures
 
-2. **JavaScript/TypeScript**: Use `@modelcontextprotocol/sdk`
-   ```bash
-   npm install @modelcontextprotocol/sdk
-   ```
+**Error:** "MCP tool call error" with details
 
-See the [MCP Documentation](https://modelcontextprotocol.io/docs) for implementation guides.
+**Solutions:**
+1. Verify tool name matches server implementation
+2. Check argument types and structure
+3. Review server logs for error details
+4. Test endpoint directly with curl/Postman
 
-## Security Considerations
+### Cleanup Stuck Servers
 
-- **Never commit secrets**: Use environment variables for API keys
-- **Use HTTPS**: For HTTP transport in production
-- **Limit permissions**: Only grant MCP servers necessary access
-- **Review server code**: Before running third-party MCP servers
+```bash
+# Find MCP processes
+ps aux | grep -E "duckduckgo|mcp|n8n|flowise"
+
+# Kill specific server
+pkill -f "@nickclyde/duckduckgo-mcp-server"
+
+# Kill all MCP processes
+pkill -f "mcp"
+
+# Force cleanup
+killall -9 npx uvx python3
+```
+
+### Debug Mode
+
+```bash
+# Enable verbose logging
+export PENGUINCODE_LOG_LEVEL=debug
+export MCP_DEBUG=1
+
+# Start PenguinCode with debug output
+RUST_BACKTRACE=1 penguincode --debug
+```
 
 ---
 
-**See Also:**
-- [Model Context Protocol](https://modelcontextprotocol.io/)
+**Resources:**
+- [Model Context Protocol Spec](https://modelcontextprotocol.io/)
 - [MCP Server Registry](https://github.com/modelcontextprotocol/servers)
-- [USAGE.md](USAGE.md) for full configuration guide
+- [USAGE.md](USAGE.md) - Full configuration reference

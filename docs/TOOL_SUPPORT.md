@@ -1,170 +1,452 @@
-# Ollama Tool/Function Calling Support
+# Tool Support in PenguinCode
 
-PenguinCode uses Ollama's tool calling capability to route requests to specialized agents. This document explains which models support native tool calling and how PenguinCode handles models that don't.
+## Overview
 
-## How Tool Calling Works
+PenguinCode provides a comprehensive tool system enabling AI models to execute filesystem operations, shell commands, web searches, and maintain persistent memory. The architecture supports both **local execution** on the client machine and **remote execution** through MCP (Model Context Protocol) servers.
 
-When you make a request to PenguinCode, the ChatAgent (orchestrator) decides which specialized agent to use:
-- **spawn_executor** - For code writing, file operations, bash commands
-- **spawn_explorer** - For reading files, searching code, understanding codebase
-- **spawn_researcher** - For web research, documentation lookup
-- **spawn_planner** - For complex multi-step tasks
+## Ollama Model Compatibility
 
-The ChatAgent can receive this routing decision in two ways:
-1. **Native tool calls** - Ollama returns structured tool_calls in the response
-2. **JSON text parsing** - Model outputs JSON like `{"name": "spawn_executor", ...}` in text
+### Native Tool Calling Support
 
-## Models with Native Tool Support
+The following Ollama models natively support tool calling through JSON function definitions:
 
-Ollama maintains a list of models supporting native tool calling:
-https://ollama.com/search?c=tools
+| Model | Size Variants | Support Level | Notes |
+|-------|--------------|---------------|-------|
+| **llama3.2** | 1B, 3B, 8B, 11B | Full | Recommended base model. Excellent instruction following. |
+| **qwen2.5-coder** | 1.5B, 7B, 32B | Full | Code-aware. Default execution model in PenguinCode. |
+| **mistral** | 7B, 8B | Full | Fast inference, reliable tool use. |
+| **neural-chat** | 7B | Full | Conversation-optimized with tools. |
+| **openhermes** | 7B | Partial | Basic tool support. |
+| **deepseek-coder** | 6.7B, 33B | Full | Strong code + tool integration. |
+| **command-r** | 35B, 104B | Full | Cohere's dense model. |
+| **firefunction-v2** | - | Full | Specifically designed for function calling. |
+| **hermes3** | 70B | Full | Fine-tuned for function calling. |
 
-### Tested Working (Native Tools)
+**Note**: Not all models handle tools equally. Test with your specific use case before production deployment.
 
-These models reliably return structured tool_calls:
+## Built-in Tools
 
-| Model | Notes |
-|-------|-------|
-| `llama3.1` | 8B, 70B, 405B - Full tool support |
-| `llama3.3` | Full tool support |
-| `llama4` | Full tool support |
-| `mistral` | All variants |
-| `mistral-nemo` | Recommended for orchestration |
-| `mistral-small` | Good balance of speed/capability |
-| `mistral-large` | Best quality, slower |
-| `mixtral` | MoE variant |
-| `command-r` | Cohere's model |
-| `command-r-plus` | Larger variant |
-| `command-r7b` | Smaller variant |
-| `firefunction-v2` | Specifically designed for function calling |
-| `qwen3` | Works well with tools |
-| `hermes3` | Fine-tuned for function calling |
+### File Operations
 
-### Important: Streaming Tool Calls
+#### `read` - Read File Contents
+**Purpose**: Read files with optional line range selection and metadata.
 
-When using streaming responses, Ollama sends tool_calls in the **first chunk** with `done: false`, not in the final chunk. PenguinCode handles this correctly by checking for tool_calls in every chunk.
-
-```python
-# Ollama sends tool_calls early in streaming
-{"message": {"tool_calls": [...]}, "done": false}  # Tool calls here!
-{"message": {"content": ""}, "done": true}          # No tool_calls here
-```
-
-### Models Without Native Tool Support
-
-These models return errors when tools are passed:
-
-| Model | Behavior |
-|-------|----------|
-| `codellama` | Returns 400 error with tools |
-| `deepseek-coder` | Not tested with tools |
-
-For these models, PenguinCode falls back to JSON text parsing from the response.
-
-## Configuration Recommendations
-
-### For Best Tool Support (if you have 16GB+ VRAM)
-
-```yaml
-models:
-  orchestration: "mistral-nemo"  # Native tool support
-  execution: "qwen2.5-coder:7b"  # Best code quality
-  exploration: "llama3.1:8b"     # Native tool support
-  planning: "llama3.1:8b"        # Native tool support
-```
-
-### For 8GB VRAM (Current Default)
-
-```yaml
-models:
-  orchestration: "llama3.2:3b"   # Fast, JSON text parsing
-  execution: "qwen2.5-coder:7b"  # Best code quality
-  exploration: "llama3.2:3b"     # Fast exploration
-  planning: "deepseek-coder:6.7b"
-```
-
-### For Minimal VRAM (4GB)
-
-```yaml
-models:
-  orchestration: "llama3.2:1b"
-  execution: "qwen2.5-coder:1.5b"
-  exploration: "llama3.2:1b"
-  planning: "llama3.2:3b"
-```
-
-## How PenguinCode Handles This
-
-The ChatAgent automatically detects whether a model supports native tools:
-
-```python
-# Models that work with native tool calls
-native_tool_models = {
-    "llama3.1", "llama3.3", "llama4",
-    "mistral", "mistral-nemo", "mistral-small", "mistral-large", "mixtral",
-    "command-r", "command-r-plus", "command-r7b",
-    "firefunction-v2", "qwen3", "hermes3",
+```json
+{
+  "name": "read",
+  "arguments": {
+    "path": "/path/to/file.py",
+    "start_line": 10,
+    "end_line": 20
+  }
 }
 ```
 
-For models NOT in this list:
-1. Tools are NOT passed to the API (avoids empty responses)
-2. The system prompt instructs the model to output JSON tool calls
-3. PenguinCode parses JSON from the text response
-4. Falls back to intent detection from the user message if JSON parsing fails
+**Parameters**:
+- `path` (required): Absolute or relative file path
+- `start_line` (optional): Starting line number (1-indexed)
+- `end_line` (optional): Ending line number (1-indexed, inclusive)
+
+**Response**: File contents with line numbers, total line count in metadata.
+
+#### `write` - Write/Create Files
+**Purpose**: Write content to files, creating parent directories as needed.
+
+```json
+{
+  "name": "write",
+  "arguments": {
+    "path": "/path/to/newfile.txt",
+    "content": "File contents here"
+  }
+}
+```
+
+**Parameters**:
+- `path` (required): File path
+- `content` (required): Content to write
+- `create_dirs` (optional, default: true): Auto-create parent directories
+
+#### `edit` - Edit Files with Search/Replace
+**Purpose**: Modify files using text search and replace.
+
+```json
+{
+  "name": "edit",
+  "arguments": {
+    "path": "/path/to/file.py",
+    "old_text": "old_function():",
+    "new_text": "new_function():",
+    "replace_all": false
+  }
+}
+```
+
+**Parameters**:
+- `path` (required): File path
+- `old_text` (required): Text to find
+- `new_text` (required): Replacement text
+- `replace_all` (optional, default: false): Replace all occurrences
+
+#### `bash` - Execute Shell Commands
+**Purpose**: Run shell commands with timeout and environment support.
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "python -m pytest tests/",
+    "timeout": 60,
+    "env": {"PYTHONPATH": "/custom/path"}
+  }
+}
+```
+
+**Parameters**:
+- `command` (required): Shell command
+- `timeout` (optional, default: 30): Timeout in seconds
+- `env` (optional): Environment variables dict
+
+**Response**: stdout/stderr combined, exit code in metadata.
+
+#### `grep` - Search File Contents
+**Purpose**: Find patterns in files using regex.
+
+```json
+{
+  "name": "grep",
+  "arguments": {
+    "pattern": "def.*function",
+    "path": "/src",
+    "case_sensitive": true,
+    "max_results": 50
+  }
+}
+```
+
+**Parameters**:
+- `pattern` (required): Regex pattern
+- `path` (optional, default: "."): File or directory
+- `case_sensitive` (optional, default: true): Case sensitivity
+- `max_results` (optional, default: 100): Result limit
+
+**Response**: Matching lines with file paths and line numbers.
+
+#### `glob` - Find Files by Pattern
+**Purpose**: Locate files matching glob patterns.
+
+```json
+{
+  "name": "glob",
+  "arguments": {
+    "pattern": "**/*.py",
+    "path": "/src",
+    "max_results": 100
+  }
+}
+```
+
+**Parameters**:
+- `pattern` (required): Glob pattern (e.g., "**/*.py", "src/**/*.ts")
+- `path` (optional, default: "."): Base directory
+- `max_results` (optional, default: 100): Result limit
+
+**Response**: File paths relative to base directory.
+
+### Web Tools
+
+#### `web_search` - Search the Internet
+**Purpose**: Query the web using configured search engines.
+
+```json
+{
+  "name": "web_search",
+  "arguments": {
+    "query": "Python async programming best practices",
+    "max_results": 5
+  }
+}
+```
+
+**Configured Engines** (from config.yaml):
+- `duckduckgo` (default) - Privacy-focused
+- `fireplexity` - Fast synthesis
+- `sciraai` - Academic search
+- `searxng` - Meta-search
+- `google` - Full-featured (requires API key)
+
+### Memory Tool
+
+#### `memory` - Persistent Context Retrieval
+**Purpose**: Store and retrieve relevant context using mem0 vector memory.
+
+```json
+{
+  "name": "memory",
+  "arguments": {
+    "action": "search",
+    "query": "user preferences for code style",
+    "user_id": "session123",
+    "limit": 5
+  }
+}
+```
+
+**Actions**:
+- `search`: Find relevant memories by semantic similarity
+- `add`: Store new memory entry
+- `get_all`: Retrieve all memories for session
+- `update`: Modify existing memory
+- `delete`: Remove specific memory
+- `delete_all`: Clear all session memories
+
+**Vector Store Backends**:
+- **Chroma** (default) - Local, file-based
+- **Qdrant** - Dedicated vector database
+- **PostgreSQL (pgvector)** - Enterprise relational + vectors
+
+## Tool Definition Format for Ollama
+
+When using Ollama with tool calling, use OpenAI-compatible JSON schema:
+
+```json
+{
+  "model": "llama3.2:8b",
+  "messages": [{"role": "user", "content": "Read the config"}],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Read file contents",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "File path"},
+            "start_line": {"type": "integer", "description": "Start line"},
+            "end_line": {"type": "integer", "description": "End line"}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ]
+}
+```
+
+## How ChatAgent Handles Tool Calls
+
+The ChatAgent orchestrator processes tool calls through this workflow:
+
+1. **Tool Definition**: Tools passed to Ollama in request
+2. **Model Response**: Ollama returns structured tool_calls JSON
+3. **Tool Routing**: ChatAgent identifies and executes tool
+4. **Local vs Remote**: Routes to LocalToolExecutor or MCP server
+5. **Result Processing**: Tool output formatted and added to context
+6. **Continuation**: Model continues reasoning with results
+7. **Final Response**: Model generates final answer
+
+## Local vs Server Tool Execution
+
+### Local Execution (Default - Development)
+
+Tools execute on the **client machine**:
+
+```yaml
+client:
+  local_tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - glob
+```
+
+**Advantages**:
+- Direct filesystem access
+- Full shell command support
+- No network latency
+- Immediate execution
+
+**Security**: Subject to user's filesystem and shell permissions.
+
+### Remote Execution (Production)
+
+For distributed deployments, tools execute on server:
+
+```yaml
+server:
+  mode: "remote"
+  host: "0.0.0.0"
+  port: 50051
+  tls_enabled: true
+
+client:
+  server_url: "grpc://server:50051"
+  local_tools: []
+```
+
+**Architecture**: Client → gRPC/TLS → Server → Tool Execution
+
+## Adding Custom Tools
+
+### 1. Create Tool Class
+
+```python
+from penguincode.tools.base import BaseTool, ToolResult
+
+class MyCustomTool(BaseTool):
+    def __init__(self):
+        super().__init__(
+            name="my_tool",
+            description="Does something useful"
+        )
+
+    async def execute(self, my_param: str, **kwargs) -> ToolResult:
+        try:
+            result = process_data(my_param)
+            return ToolResult(
+                success=True,
+                data=result,
+                metadata={"processed": True}
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=str(e)
+            )
+```
+
+### 2. Register with Executor
+
+Add to `penguincode/client/tool_executor.py`:
+
+```python
+self._available_tools.append("my_tool")
+
+elif tool_name == "my_tool":
+    return await self._execute_my_tool(arguments, timeout)
+```
+
+### 3. Define Ollama Schema
+
+```python
+TOOL_SCHEMAS = {
+    "my_tool": {
+        "type": "function",
+        "function": {
+            "name": "my_tool",
+            "description": "Does something useful",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "my_param": {
+                        "type": "string",
+                        "description": "Parameter description"
+                    }
+                },
+                "required": ["my_param"]
+            }
+        }
+    }
+}
+```
+
+## Tool Result Handling
+
+All tools return the `ToolResult` dataclass:
+
+```python
+from penguincode.tools.base import ToolResult
+
+@dataclass
+class ToolResult:
+    success: bool                   # Did tool succeed?
+    data: Any                       # Result data
+    error: Optional[str] = None     # Error message if failed
+    metadata: Optional[Dict] = None # Additional metadata
+```
+
+### Example Results
+
+**Success**:
+```python
+ToolResult(
+    success=True,
+    data="File contents here",
+    metadata={"path": "/file.txt", "lines": 42}
+)
+```
+
+**Error**:
+```python
+ToolResult(
+    success=False,
+    error="File not found: /missing.txt"
+)
+```
+
+## Configuration Reference
+
+From `config.yaml`:
+
+```yaml
+# Research (web search)
+research:
+  engine: "duckduckgo"
+  use_mcp: true
+  max_results: 5
+
+# Memory (persistent context)
+memory:
+  enabled: true
+  vector_store: "chroma"
+  embedding_model: "nomic-embed-text"
+
+# MCP Servers (extend tools)
+mcp:
+  enabled: true
+  servers:
+    - name: "duckduckgo"
+      transport: "stdio"
+      command: "npx"
+      args: ["-y", "@nickclyde/duckduckgo-mcp-server"]
+
+# Client (local tools)
+client:
+  local_tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - glob
+```
+
+## Best Practices
+
+1. **Chain Tools**: Use read → grep → edit workflows for complex operations
+2. **Handle Errors**: Always check `success` field in ToolResult
+3. **Set Timeouts**: Use appropriate timeout for long operations (default 30s)
+4. **Absolute Paths**: Use full paths to avoid ambiguity
+5. **Memory Context**: Store important findings for multi-turn sessions
+6. **Destructive Check**: Warn before bash operations (rm, mkfs, dd, etc.)
 
 ## Troubleshooting
 
-### Empty Responses
-
-If you see `LLM RESPONSE (0 chars)` in logs:
-- The model doesn't support native tools but is receiving them
-- Solution: Check if model is in the `native_tool_models` list
-- Or switch to a model that supports native tools
-
-### Tool Calls Not Detected
-
-If the agent isn't spawning correctly:
-1. Check logs for the LLM response text
-2. Verify the response contains valid JSON with `name` and `arguments`
-3. Ensure the system prompt is being included
-
-### Model Not Found (404)
-
-If you see `404 Not Found` errors:
-- The configured model isn't installed
-- Run `ollama list` to see available models
-- Run `ollama pull <model>` to install
-
-## Adding Support for New Models
-
-To test if a model supports native tools:
-
-```bash
-curl http://localhost:11434/api/chat -d '{
-  "model": "MODEL_NAME",
-  "messages": [{"role": "user", "content": "Say hello"}],
-  "tools": [{
-    "type": "function",
-    "function": {
-      "name": "greet",
-      "description": "Greet someone",
-      "parameters": {
-        "type": "object",
-        "properties": {"name": {"type": "string"}},
-        "required": ["name"]
-      }
-    }
-  }]
-}'
-```
-
-If response contains `"tool_calls"` with structured data, it supports native tools.
-If response is empty or contains JSON text in `"content"`, use JSON parsing.
+| Issue | Solution |
+|-------|----------|
+| Tool returns empty | Check file exists and is readable |
+| Command timeout | Increase timeout parameter for long tasks |
+| Permission denied | Verify file permissions and user access |
+| Memory disabled error | Enable memory in config.yaml |
+| MCP server failed | Verify server running, check command in config |
+| Model 404 error | Run `ollama pull <model>` to install |
 
 ---
 
-**See Also**:
-- [Ollama Tools Models](https://ollama.com/search?c=tools)
-- [Ollama Tool Support Blog](https://ollama.com/blog/tool-support)
-- [USAGE.md](USAGE.md) for full configuration guide
+**Related Documentation**:
+- [Development Standards](./STANDARDS.md) - Architecture overview
+- [Configuration](../config.yaml) - Tool configuration
+- [Licensing](./licensing/license-server-integration.md) - Enterprise features

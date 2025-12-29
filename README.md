@@ -24,6 +24,7 @@
 - 🧠 **Persistent Memory** - mem0 integration for context across sessions
 - 📚 **Documentation RAG** - Auto-indexes docs for your project's languages and libraries
 - 🔌 **MCP Integration** - Extend with N8N, Flowise, and custom MCP servers
+- 🌐 **Client-Server Mode** - gRPC server for remote Ollama and team deployments
 - ⚡ **GPU Optimized** - Smart model switching for RTX 4060 Ti (8GB VRAM) or higher
 - 🐧 **Cross-Platform** - Works on Linux, macOS, and Windows
 
@@ -54,16 +55,31 @@ penguincode chat
 
 **VS Code Extension**: Download VSIX from [Releases](https://github.com/penguintechinc/penguin-code/releases)
 
+### Server Mode (Team Deployment)
+
+```bash
+# Start gRPC server (connects to local Ollama)
+python -m penguincode.server.main
+
+# Or use Docker
+docker compose up -d
+
+# Connect from client
+penguincode chat --server localhost:50051
+```
+
+See [Architecture Documentation](docs/ARCHITECTURE.md) for remote deployment with TLS and authentication.
+
 ## Documentation
 
 - **[Usage Guide](docs/USAGE.md)** - Installation, configuration, and usage
-- **[MCP Integration](docs/MCP.md)** - Extend with N8N, Flowise, and custom servers
-- **[Tool Support](docs/TOOL_SUPPORT.md)** - Ollama models with native tool calling
-- **[Documentation RAG](docs/DOCS_RAG.md)** - Project-aware documentation indexing
+- **[Architecture](docs/ARCHITECTURE.md)** - Client-server architecture and deployment modes
 - **[Agent Architecture](docs/AGENTS.md)** - ChatAgent, Explorer, Executor, Planner
-- **[Security](docs/SECURITY.md)** - OWASP Top 10 compliance and secure code generation
-- **[Workflows](docs/WORKFLOWS.md)** - GitHub Actions and release process
-- **[Standards](docs/STANDARDS.md)** - Development standards
+- **[Tool Support](docs/TOOL_SUPPORT.md)** - Ollama models with native tool calling
+- **[MCP Integration](docs/MCP.md)** - Extend with N8N, Flowise, and custom servers
+- **[Memory](docs/MEMORY.md)** - Persistent memory with mem0 integration
+- **[Documentation RAG](docs/DOCS_RAG.md)** - Project-aware documentation indexing
+- **[Security](docs/SECURITY.md)** - Authentication, TLS, and secure code generation
 - **[Contributing](docs/CONTRIBUTING.md)** - How to contribute
 
 ## License

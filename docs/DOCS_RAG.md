@@ -1,288 +1,533 @@
 # Documentation RAG System
 
-Project-aware documentation retrieval for intelligent code assistance.
-
 ## Table of Contents
 
 - [Overview](#overview)
-- [How It Works](#how-it-works)
+- [What is Documentation RAG](#what-is-documentation-rag)
+- [Auto-Detection](#auto-detection-of-project-languages)
 - [Supported Languages](#supported-languages)
-- [Configuration](#configuration)
-- [REPL Commands](#repl-commands)
-- [Architecture](#architecture)
-- [Adding New Languages](#adding-new-languages)
+- [Detection Methods](#how-detection-works)
+- [Configuration](#configuration-options)
+- [Indexing](#how-indexing-works)
+- [RAG Retrieval](#rag-retrieval-and-enhancement)
+- [Manual Configuration](#manual-configuration-for-libraries)
+- [Troubleshooting](#troubleshooting-indexing-issues)
 
 ---
 
 ## Overview
 
-The Documentation RAG (Retrieval-Augmented Generation) system automatically detects your project's languages and libraries, fetches relevant documentation, and injects it into prompts for more accurate code assistance.
+PenguinCode's Documentation RAG (Retrieval-Augmented Generation) system automatically detects which programming languages and libraries your project uses, fetches their official documentation, and uses it to provide accurate, context-aware answers.
 
 **Key Features**:
-- **Project-aware** - Only indexes docs for languages/libraries you actually use
-- **TTL-based caching** - Documentation expires after 7 days (configurable)
-- **Automatic cleanup** - Removes docs for libraries no longer in your project
-- **Token-aware** - Respects context limits when injecting documentation
+- **Automatic Detection** - Scans dependency files to find languages and libraries
+- **Smart Caching** - TTL-based cache with configurable expiration (default 7 days)
+- **Vector Search** - Uses ChromaDB for semantic document retrieval
+- **Seamless Integration** - Auto-indexes docs on startup or on-demand
+- **Multi-Language Support** - Python, JavaScript, TypeScript, Go, Rust, HCL, Ansible
 
 ---
 
-## How It Works
+## What is Documentation RAG
 
-### 1. Project Detection
+RAG (Retrieval-Augmented Generation) combines retrieval and generation for better answers:
 
-On startup, PenguinCode scans your project for dependency files:
+1. **Retrieval**: Search indexed documentation for relevant content
+2. **Augmentation**: Pass retrieved docs to the LLM as context
+3. **Generation**: LLM generates answers grounded in official sources
+
+Example: When you ask "How do I validate JSON with Pydantic?":
+- System searches indexed Pydantic documentation
+- Retrieves relevant chunks about validation
+- Provides docs to Claude as context
+- Claude generates answer with references to official docs
+
+---
+
+## Auto-Detection of Project Languages
+
+PenguinCode automatically detects which languages your project uses by scanning:
+
+### Detection Methods
+
+1. **File Extensions**: Scans top-level and `src/` directories for language files
+2. **Dependency Files**: Parses `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, etc.
+3. **Configuration Files**: Checks for `tsconfig.json`, `ansible.cfg`, `.terraform.lock.hcl`
+4. **Directory Structures**: Looks for `roles/`, `inventory/` (Ansible)
+
+### Detection Flow
 
 ```
-pyproject.toml  →  Python + libraries (pydantic, fastapi, etc.)
-package.json    →  JavaScript/TypeScript + npm packages
-go.mod          →  Go + modules
-Cargo.toml      →  Rust + crates
-*.tf / *.tofu   →  OpenTofu/Terraform + providers
-ansible.cfg     →  Ansible + collections
+Project Directory
+    ├── Scan file extensions (.py, .js, .ts, .go, .rs, .tf)
+    ├── Parse dependency files
+    ├── Check config files
+    └── Build ProjectContext (languages + libraries)
 ```
-
-### 2. Documentation Fetching
-
-For detected libraries, docs are fetched from official sources:
-
-```
-FastAPI     →  https://fastapi.tiangolo.com/
-React       →  https://react.dev/
-AWS Provider →  https://registry.terraform.io/providers/hashicorp/aws/
-community.docker →  https://docs.ansible.com/ansible/latest/collections/community/docker/
-```
-
-### 3. Indexing & Embedding
-
-Documentation is:
-1. Converted from HTML to markdown
-2. Chunked into ~1000 character segments with overlap
-3. Embedded using Ollama (nomic-embed-text)
-4. Stored in ChromaDB for vector search
-
-### 4. Context Injection
-
-When you ask a question:
-1. Query is analyzed for relevance
-2. Matching documentation chunks are retrieved
-3. Most relevant chunks are injected into the prompt
-4. AI responds with documentation-informed answers
 
 ---
 
 ## Supported Languages
 
+| Language | Detection | Dependencies |
+|----------|-----------|--------------|
+| **Python** | `.py`, `pyproject.toml`, `requirements.txt` | PyDAL, FastAPI, Django, Flask, etc. |
+| **JavaScript** | `.js`, `.jsx`, `package.json` | React, Express, Next.js, Axios, etc. |
+| **TypeScript** | `.ts`, `.tsx`, `tsconfig.json` | Zod, Prisma, Vite, Vitest, etc. |
+| **Go** | `.go`, `go.mod`, `go.sum` | Gin, Echo, GORM, Fiber, etc. |
+| **Rust** | `.rs`, `Cargo.toml` | Tokio, Serde, Actix-web, Diesel, etc. |
+| **HCL** | `.tf`, `.tofu`, `.terraform.lock.hcl` | AWS, Azure, Google Cloud, Kubernetes, etc. |
+| **Ansible** | `ansible.cfg`, `roles/`, `requirements.yml` | Collections, roles from Ansible Galaxy |
+
 ### Python
 
-**Detection files**: `pyproject.toml`, `requirements.txt`, `setup.py`, `Pipfile`
+**Detections**: Files with `.py`, `pyproject.toml`, `requirements.txt`, `setup.py`, `Pipfile`
 
-**Supported libraries**:
-- Web: FastAPI, Django, Flask, aiohttp
-- Data: SQLAlchemy, Pydantic, Pandas, NumPy
-- CLI: Typer, Click, Rich
-- Testing: pytest
-- AWS: boto3
-- HTTP: requests, httpx
-- Tasks: Celery, Redis
+**Libraries**: FastAPI, Django, Flask, SQLAlchemy, Pydantic, Pytest, NumPy, Pandas, Boto3, etc.
 
-### JavaScript / TypeScript
+### JavaScript/TypeScript
 
-**Detection files**: `package.json`, `tsconfig.json`
+**Detections**: Files with `.js`, `.jsx`, `.ts`, `.tsx`, `package.json`, `tsconfig.json`
 
-**Supported libraries**:
-- Frameworks: React, Vue, Next.js, Express
-- Utilities: Axios, Zod, Prisma
-- Styling: Tailwind CSS
-- Build: Vite, Vitest
+**Libraries**: React, Vue, Next.js, Express, Axios, Prisma, Tailwind CSS, Vite, etc.
 
 ### Go
 
-**Detection files**: `go.mod`, `go.sum`
+**Detections**: Files with `.go`, `go.mod`, `go.sum`
 
-**Supported libraries**:
-- Web: Gin, Echo, Fiber
-- ORM: GORM
+**Libraries**: Gin, Echo, Fiber, GORM, etc.
 
 ### Rust
 
-**Detection files**: `Cargo.toml`
+**Detections**: Files with `.rs`, `Cargo.toml`
 
-**Supported libraries**:
-- Async: Tokio
-- Serialization: Serde
-- Web: Actix-web, Reqwest
-- Database: Diesel
+**Libraries**: Tokio, Serde, Actix-web, Reqwest, Diesel, etc.
 
-### OpenTofu / Terraform (HCL)
+### HCL (Terraform/OpenTofu)
 
-**Detection files**: `*.tf`, `*.tofu`, `.terraform.lock.hcl`
+**Detections**: Files with `.tf`, `.tofu`, `.terraform.lock.hcl`
 
-**Supported providers**:
-- Cloud: AWS, Azure, Google Cloud, DigitalOcean, Cloudflare
-- Containers: Kubernetes, Helm, Docker
-- Utilities: Random, Null, Local, TLS
+**Providers**: AWS, Azure, Google Cloud, DigitalOcean, Cloudflare, Kubernetes, Docker, etc.
 
 ### Ansible
 
-**Detection files**: `ansible.cfg`, `playbook.yml`, `site.yml`, `requirements.yml`, `galaxy.yml`
+**Detections**: `ansible.cfg`, `playbook.yml`, `site.yml`, `roles/`, `inventory/`, `requirements.yml`
 
-**Detection directories**: `roles/`, `inventory/`
-
-**Supported collections**:
-- Core: ansible.builtin, ansible.posix, ansible.netcommon
-- Community: community.general, community.docker, community.kubernetes
-- Cloud: amazon.aws, azure.azcollection, google.cloud
-- Database: community.postgresql, community.mysql
-- Containers: kubernetes.core
+**Collections**: ansible.builtin, ansible.posix, community.docker, community.kubernetes, amazon.aws, azure.azcollection, etc.
 
 ---
 
-## Configuration
+## How Detection Works
 
-### config.yaml
+### Python Detection
+
+Triggers on any of:
+- Files: `*.py`, `pyproject.toml`, `requirements.txt`, `setup.py`, `Pipfile`
+- Parses dependencies with versions
+- Extracts from `[project.dependencies]` and `[tool.poetry.dependencies]`
+
+### JavaScript/TypeScript Detection
+
+Triggers on:
+- Files: `*.js`, `*.jsx`, `*.ts`, `*.tsx`, `package.json`
+- TypeScript detected if `tsconfig.json` exists alongside JS
+- Parses `dependencies` and `devDependencies`
+- Filters: skips `@types/*` packages (type definitions)
+
+### Go Detection
+
+Triggers on:
+- Files: `*.go`, `go.mod`, `go.sum`
+- Parses `require` blocks and single-line `require` statements
+- Includes version constraints
+
+### Terraform/OpenTofu Detection
+
+Triggers on:
+- Files: `*.tf`, `*.tofu`, `.terraform.lock.hcl`
+- Parses `provider` blocks and `required_providers`
+- Extracts from lock file for locked versions
+
+### Ansible Detection
+
+Triggers on:
+- Files: `ansible.cfg`, `playbook.yml`, `site.yml`
+- Directories: `roles/`, `inventory/`
+- Files: `requirements.yml`, `galaxy.yml`
+- Parses collections and roles from requirements
+
+---
+
+## Configuration Options
+
+All options are in `config.yaml` under the `docs_rag` section:
 
 ```yaml
 docs_rag:
-  # Enable/disable the entire system
-  enabled: true
+  enabled: true                    # Master switch (true/false)
+  auto_detect_on_start: true      # Detect languages at startup
+  auto_detect_on_request: true    # Detect from request content
+  auto_index_on_detect: true      # Index docs when detected
+  auto_index_on_request: true     # Index on-demand when needed
+
+  # Manual language configuration
+  languages_manual:
+    python: false        # false = auto-detect, true = force index
+    javascript: false
+    typescript: false
+    go: false
+    rust: false
+    hcl: false
+    ansible: false
+
+  # Priority libraries to always index
+  libraries_manual: []
+    # - fastapi
+    # - pytest
+    # - numpy
 
   # Cache settings
   cache_dir: "./.penguincode/docs"
-  cache_max_age_days: 7
-
-  # Indexing limits
-  max_pages_per_library: 50
-  max_libraries_to_index: 20
-
-  # Context injection
-  max_context_tokens: 2000
-  max_chunks_per_query: 5
-
-  # Automatic behavior
-  auto_detect_on_start: true
-  auto_index_on_detect: false
-
-  # ChromaDB collection name
-  collection: "penguincode_docs"
-
-  # Chunking parameters
-  chunk_size: 1000
-  chunk_overlap: 200
+  cache_max_age_days: 7           # TTL for cached docs
+  max_pages_per_library: 50       # Max pages to fetch per library
+  max_libraries_to_index: 20      # Max total libraries indexed
 ```
 
-### Environment Variables
+### Configuration Behaviors
 
-```bash
-# Override cache directory
-export PENGUINCODE_DOCS_CACHE="/path/to/docs/cache"
+**`auto_detect_on_start: true`**
+- At startup, scans project directory for languages and libraries
+- Builds ProjectContext from dependencies
+- Prepares for auto_index_on_detect
+
+**`auto_detect_on_request: true`**
+- Analyzes user request for language keywords
+- Dynamically updates library list based on request
+- Overrides manual_languages if detected in request
+
+**`auto_index_on_detect: true`**
+- When language detected, automatically fetches and indexes docs
+- Happens at startup if auto_detect_on_start is true
+- Respects max_libraries_to_index limit
+
+**`auto_index_on_request: true`**
+- If user asks about library not yet indexed, fetches on-demand
+- Useful for multi-language projects
+- Prevents blocking on startup
+
+**`languages_manual`**
+- `false`: Use auto-detection (default)
+- `true`: Force index language even if not detected
+- Manual settings act as baseline; auto-detect adds to them
+
+**`libraries_manual`**
+- List of library names to prioritize
+- Examples: `["fastapi", "pytest", "numpy"]`
+- Indexed before auto-detected libraries
+- Respects max_libraries_to_index limit
+
+### Cache Settings
+
+**`cache_dir`**: Where to store fetched documentation
+- Default: `./.penguincode/docs`
+- Stores HTML converted to markdown
+- Maintains cache index JSON
+
+**`cache_max_age_days`**: How long to keep cached docs
+- Default: `7` days
+- After N days, docs re-fetched on next request
+- Ensures latest documentation is available
+
+**`max_pages_per_library`**: Limit docs fetched per library
+- Default: `50` pages
+- Includes base_url, api_docs_path, and guide_path
+- Balances coverage vs. storage/performance
+
+**`max_libraries_to_index`**: Total libraries to index
+- Default: `20` libraries
+- Limits vector store and memory usage
+- Priority: manual libraries first, then detected
+
+---
+
+## How Indexing Works
+
+### Indexing Pipeline
+
+```
+1. Detect Library/Language
+   └─ Parse dependency file
+   └─ Extract name + version
+
+2. Fetch Documentation
+   └─ Query official source
+   └─ Convert HTML to markdown
+   └─ Cache locally with TTL
+
+3. Chunk Documentation
+   └─ Split into 1000-char chunks
+   └─ 200-char overlap
+   └─ Preserve structure
+
+4. Generate Embeddings
+   └─ Use Ollama's nomic-embed-text
+   └─ Async embedding generation
+   └─ Handle errors gracefully
+
+5. Store in ChromaDB
+   └─ Cosine similarity metric
+   └─ Track metadata (library, version, url)
+   └─ Update index metadata
+```
+
+### Caching Strategy
+
+Documentation is cached locally to avoid re-fetching:
+
+```
+Cache Structure:
+./.penguincode/docs/
+├── cache_index.json          # Index of all cached pages
+├── {hash}.md                 # Fetched page (markdown)
+└── ...
+
+Metadata Per Entry:
+{
+  "url": "https://docs.fastapi.io/",
+  "fetch_time": "2025-12-28T10:30:00",
+  "ttl_days": 7,
+  "library": "fastapi",
+  "language": "python"
+}
+```
+
+### Expiration and Cleanup
+
+- Cached entries expire after `cache_max_age_days`
+- Expired entries removed on next fetch
+- If library removed from project, cached docs auto-deleted
+- Metadata tracked for each entry
+
+### Storage Structure
+
+```
+Index Storage:
+./.penguincode/docs_index/
+├── index_metadata.json       # Libraries/languages indexed
+└── [ChromaDB vector storage]
+
+Metadata Tracks:
+- Library name + version
+- Index timestamp
+- Chunk count per library
+- Document metadata
 ```
 
 ---
 
-## REPL Commands
+## RAG Retrieval and Enhancement
 
-### `/docs status`
+### Search Flow
 
-Show current documentation index status:
+When you ask a question:
 
-```
-> /docs status
+```python
+1. Analyze question
+   └─ Detect mentioned libraries/languages
+   └─ Filter to relevant docs
 
-Documentation RAG Status
-========================
-Languages detected: python, hcl
-Libraries indexed: 5
+2. Generate Query Embedding
+   └─ Convert question to vector
+   └─ Send to Ollama embedding model
 
-Library          Chunks  Indexed       Expires       Status
-─────────────────────────────────────────────────────────────
-fastapi          45      2025-12-28    2026-01-04    Valid
-pydantic         32      2025-12-28    2026-01-04    Valid
-aws              128     2025-12-27    2026-01-03    Valid
-kubernetes       67      2025-12-25    2026-01-01    Expired
-sqlalchemy       41      2025-12-28    2026-01-04    Valid
+3. Vector Search
+   └─ Search ChromaDB for similar chunks
+   └─ Use cosine similarity metric
+   └─ Return top 5 results (default)
 
-Total chunks: 313
-Cache size: 2.4 MB
-```
+4. Rank by Relevance
+   └─ Score: 1.0 - distance
+   └─ Include source URL + library
+   └─ Format for LLM context
 
-### `/docs detect`
-
-Re-detect project languages and libraries:
-
-```
-> /docs detect
-
-Scanning project...
-Found: Python (pyproject.toml)
-Found: HCL (main.tf, variables.tf)
-
-Languages: python, hcl
-Libraries: fastapi, pydantic, sqlalchemy, aws, kubernetes
+5. Augment Prompt
+   └─ Add retrieved docs to prompt
+   └─ Claude generates grounded answer
+   └─ Includes citations to sources
 ```
 
-### `/docs index [library]`
+### Search Filtering
 
-Index documentation for a specific library or all detected:
+Search can filter to:
+- Specific libraries: `["fastapi", "pydantic"]`
+- Specific languages: `["python", "javascript"]`
+- Or search all indexed docs
 
-```
-> /docs index fastapi
-Fetching FastAPI documentation...
-Indexed 45 chunks from 3 pages
+---
 
-> /docs index
-Indexing all detected libraries...
-fastapi: 45 chunks
-pydantic: 32 chunks
-sqlalchemy: 41 chunks
-Done! Indexed 118 chunks
-```
+## Manual Configuration for Libraries
 
-### `/docs search <query>`
+To always index specific libraries, add to `libraries_manual`:
 
-Search indexed documentation:
-
-```
-> /docs search "FastAPI dependency injection"
-
-Results:
-─────────────────────────────────────────────────────
-[fastapi] Dependency Injection (0.92)
-FastAPI has a very powerful but intuitive Dependency Injection
-system. It is designed to be very simple to use...
-
-[fastapi] Dependencies with yield (0.85)
-FastAPI supports dependencies that do some extra steps after
-finishing. To do this, use yield instead of return...
+```yaml
+docs_rag:
+  libraries_manual:
+    - fastapi
+    - pytest
+    - numpy
+    - react
+    - prisma
 ```
 
-### `/docs clear [library]`
+For projects using many languages/libraries:
 
-Clear indexed documentation:
-
+```yaml
+docs_rag:
+  libraries_manual:
+    - fastapi        # Always index these
+    - django
+    - pydantic
+  max_libraries_to_index: 25  # Increase limit
+  cache_max_age_days: 14      # Longer cache TTL
 ```
-> /docs clear fastapi
-Cleared 45 chunks for fastapi
 
-> /docs clear
-Cleared all documentation (313 chunks)
+To force index a language even if not detected:
+
+```yaml
+docs_rag:
+  languages_manual:
+    python: true     # Force Python docs
+    go: false        # Let auto-detect decide
 ```
 
-### `/docs cleanup`
+---
 
-Remove docs for libraries no longer in project:
+## Troubleshooting Indexing Issues
 
+### Embedding Model Not Found
+
+**Error**: `Embedding failed: model not found`
+
+**Solution**:
+```bash
+ollama pull nomic-embed-text
+ollama list | grep nomic
 ```
-> /docs cleanup
-Removed docs for: old-library (23 chunks)
-Removed expired docs: kubernetes (67 chunks)
-Cleaned up 90 chunks total
+
+### Slow Documentation Fetching
+
+**Problem**: Indexing takes 30+ seconds
+
+**Solution**:
+```yaml
+docs_rag:
+  max_pages_per_library: 30    # Reduce from 50
+  max_libraries_to_index: 10   # Index fewer libraries
+```
+
+### Cache Growing Too Large
+
+**Problem**: `.penguincode/docs/` exceeds disk space
+
+**Solution**:
+```bash
+# Delete cache and re-index (fresh fetches on next request)
+rm -rf ./.penguincode/docs/cache_index.json
+```
+
+Or reduce TTL:
+```yaml
+docs_rag:
+  cache_max_age_days: 3        # Delete old docs after 3 days
+```
+
+### Library Not Found in Docs
+
+**Problem**: Documentation for library not indexed
+
+**Solution**:
+```yaml
+docs_rag:
+  auto_index_on_request: true    # Enable on-demand indexing
+  libraries_manual:
+    - your-custom-library        # Add to manual list
+```
+
+### ChromaDB Initialization Error
+
+**Problem**: `Failed to initialize ChromaDB`
+
+**Solution**:
+```bash
+# Delete index and rebuild
+rm -rf ./.penguincode/docs_index/
+pip install --upgrade chromadb
+```
+
+### Out of Memory During Indexing
+
+**Problem**: System runs out of memory while indexing
+
+**Solution**:
+```yaml
+docs_rag:
+  max_pages_per_library: 20     # Reduce page count
+  max_libraries_to_index: 5     # Index fewer libraries
+```
+
+---
+
+## Configuration Examples
+
+### Minimal Setup (Single Language)
+
+```yaml
+docs_rag:
+  enabled: true
+  auto_detect_on_start: true
+  auto_index_on_detect: true
+  languages_manual:
+    python: true
+```
+
+### Full-Featured Setup (Multi-Language)
+
+```yaml
+docs_rag:
+  enabled: true
+  auto_detect_on_start: true
+  auto_detect_on_request: true
+  auto_index_on_detect: true
+  auto_index_on_request: true
+  libraries_manual:
+    - fastapi
+    - react
+    - pydantic
+  cache_max_age_days: 14
+  max_pages_per_library: 75
+  max_libraries_to_index: 30
+```
+
+### Lightweight Setup (Resource-Constrained)
+
+```yaml
+docs_rag:
+  enabled: true
+  auto_detect_on_start: true
+  auto_index_on_detect: true
+  auto_index_on_request: false
+  libraries_manual:
+    - fastapi
+  cache_max_age_days: 30
+  max_pages_per_library: 20
+  max_libraries_to_index: 5
 ```
 
 ---
 
 ## Architecture
 
-### Components
+### System Components
 
 ```
 docs_rag/
@@ -294,147 +539,64 @@ docs_rag/
 └── injector.py    # Context injection for prompts
 ```
 
+### Component Responsibilities
+
+**Detector**: Scans dependency files to extract languages and libraries
+- Parses pyproject.toml, package.json, go.mod, etc.
+- Returns ProjectContext with detected languages and libraries
+
+**Fetcher**: Downloads documentation from official sources
+- Converts HTML to markdown
+- Implements TTL-based caching
+- Manages cache expiration and cleanup
+
+**Indexer**: Stores documentation in vector database
+- Chunks text into overlapping segments
+- Generates embeddings via Ollama
+- Stores in ChromaDB for semantic search
+- Tracks indexing metadata
+
+**Sources**: Maps libraries to documentation URLs
+- LANGUAGE_DOCS: Official docs for each language
+- LIBRARY_DOCS: Popular libraries and their doc sources
+- get_doc_source(): Looks up source by library name
+
 ### Data Flow
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Detector   │────▶│   Fetcher   │────▶│   Indexer   │
-│             │     │             │     │             │
-│ Scans deps  │     │ Downloads   │     │ Chunks &    │
-│ files       │     │ & caches    │     │ embeds      │
-└─────────────┘     └─────────────┘     └─────────────┘
-                                              │
-                                              ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  ChatAgent  │◀────│  Injector   │◀────│  ChromaDB   │
-│             │     │             │     │             │
-│ Augmented   │     │ Formats &   │     │ Vector      │
-│ prompts     │     │ injects     │     │ search      │
-└─────────────┘     └─────────────┘     └─────────────┘
-```
-
-### Storage Structure
-
-```
-.penguincode/
-├── docs/                      # Documentation cache
-│   ├── cache_index.json       # URL -> metadata mapping
-│   ├── a1b2c3d4.md           # Cached doc content
-│   └── ...
-└── docs_index/               # ChromaDB vectors
-    ├── index_metadata.json   # Library indexing metadata
-    └── chroma.sqlite3        # Vector database
-```
-
----
-
-## Adding New Languages
-
-### 1. Add to Language enum
-
-```python
-# docs_rag/models.py
-class Language(Enum):
-    PYTHON = "python"
-    # ... existing
-    NEW_LANG = "new_lang"
-```
-
-### 2. Add detection patterns
-
-```python
-# docs_rag/detector.py
-LANGUAGE_INDICATORS: Dict[Language, List[str]] = {
-    Language.NEW_LANG: ["*.newext", "newlang.config"],
-}
-
-DEPENDENCY_FILES: Dict[str, Language] = {
-    "newlang.lock": Language.NEW_LANG,
-}
-```
-
-### 3. Add file extension detection
-
-```python
-# docs_rag/detector.py (in _detect_languages_from_files)
-extension_to_language = {
-    ".newext": Language.NEW_LANG,
-}
-```
-
-### 4. Add dependency parser
-
-```python
-# docs_rag/detector.py
-def _parse_newlang_deps(self, content: str) -> List[Library]:
-    """Parse newlang.lock for dependencies."""
-    libraries = []
-    # ... parsing logic
-    return libraries
-```
-
-### 5. Add documentation sources
-
-```python
-# docs_rag/sources.py
-LANGUAGE_DOCS: Dict[Language, DocSource] = {
-    Language.NEW_LANG: DocSource(
-        base_url="https://newlang.dev/docs/",
-        api_docs_path="reference/",
-    ),
-}
-
-LIBRARY_DOCS: Dict[str, DocSource] = {
-    "popular-newlang-lib": DocSource(
-        base_url="https://popular-lib.newlang.dev/",
-    ),
-}
+Project Scan
+    │
+    ▼
+ProjectDetector
+    │ (returns: ProjectContext)
+    ▼
+DocumentationFetcher
+    │ (downloads & converts to markdown)
+    ▼
+Cache Layer
+    │ (stores with TTL metadata)
+    ▼
+DocumentationIndexer
+    │ (chunks, embeds, stores)
+    ▼
+ChromaDB
+    │ (vector storage)
+    ▼
+Vector Search
+    │ (semantic similarity)
+    ▼
+LLM Context
+    │ (injected into prompts)
+    ▼
+User Response
 ```
 
 ---
 
-## Troubleshooting
-
-### Documentation not being indexed
-
-**Check detection**:
-```
-> /docs detect
-```
-
-If your library isn't detected, ensure dependency files are in the project root.
-
-### ChromaDB errors
-
-**Reset the index**:
-```bash
-rm -rf .penguincode/docs_index
-penguincode chat
-```
-
-### Embedding failures
-
-**Check Ollama**:
-```bash
-ollama list | grep nomic-embed-text
-# If missing:
-ollama pull nomic-embed-text
-```
-
-### Cache taking too much space
-
-**Clear old docs**:
-```
-> /docs cleanup
-```
-
-Or reduce cache age:
-```yaml
-docs_rag:
-  cache_max_age_days: 3
-```
-
----
+**Learn More**:
+- See implementation files in `/home/penguin/code/PenguinCode/penguincode/docs_rag/`
+- Configuration examples above
+- Troubleshooting section for common issues
 
 **Last Updated**: 2025-12-28
-**See Also**: [USAGE.md](USAGE.md), [AGENTS.md](AGENTS.md)
+**See Also**: [USAGE.md](USAGE.md), [ARCHITECTURE.md](ARCHITECTURE.md), [STANDARDS.md](STANDARDS.md)

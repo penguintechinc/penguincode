@@ -1,12 +1,17 @@
 # PenguinCode Docker Compose
 #
 # Usage:
-#   docker compose up                    # Start server only
-#   docker compose --profile with-ollama up  # Start with bundled Ollama
+#   docker compose up                         # Start server only (uses host Ollama)
+#   docker compose --profile with-ollama up   # Start with bundled Ollama
 #
-# Environment variables:
-#   JWT_SECRET - Secret for JWT token signing (required for auth)
-#   PENGUINCODE_API_KEY - API key for client authentication
+# All configuration via environment variables - no config.yaml required!
+# See docs/CONFIGURATION.md for complete ENV variable reference.
+#
+# Quick start:
+#   OLLAMA_HOST=192.168.1.100 docker compose up
+#
+# With authentication:
+#   JWT_SECRET=your-32-char-secret PENGUINCODE_API_KEY=your-key docker compose up
 
 services:
   # PenguinCode gRPC Server
@@ -15,18 +20,62 @@ services:
       context: .
       dockerfile: Dockerfile.server
     ports:
-      - "50051:50051"
+      - "${PENGUINCODE_SERVER_PORT:-50051}:50051"
     environment:
+      # Ollama Connection
       - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
+
+      # Server Configuration
+      - PENGUINCODE_SERVER_MODE=${PENGUINCODE_SERVER_MODE:-standalone}
+      - PENGUINCODE_SERVER_HOST=0.0.0.0
+      - PENGUINCODE_SERVER_PORT=50051
+
+      # Authentication (optional)
+      - PENGUINCODE_AUTH_ENABLED=${PENGUINCODE_AUTH_ENABLED:-false}
       - PENGUINCODE_JWT_SECRET=${JWT_SECRET:-}
       - PENGUINCODE_API_KEY=${PENGUINCODE_API_KEY:-}
+
+      # Model Configuration
+      - PENGUINCODE_MODEL_PLANNING=${PENGUINCODE_MODEL_PLANNING:-deepseek-coder:6.7b}
+      - PENGUINCODE_MODEL_ORCHESTRATION=${PENGUINCODE_MODEL_ORCHESTRATION:-llama3.2:3b}
+      - PENGUINCODE_MODEL_EXECUTION=${PENGUINCODE_MODEL_EXECUTION:-qwen2.5-coder:7b}
+      - PENGUINCODE_MODEL_EXPLORATION=${PENGUINCODE_MODEL_EXPLORATION:-llama3.2:3b}
+      - PENGUINCODE_MODEL_RESEARCH=${PENGUINCODE_MODEL_RESEARCH:-llama3.2:3b}
+
+      # Memory Configuration
+      - PENGUINCODE_MEMORY_ENABLED=${PENGUINCODE_MEMORY_ENABLED:-true}
+      - PENGUINCODE_MEMORY_STORE=${PENGUINCODE_MEMORY_STORE:-chroma}
+      - PENGUINCODE_EMBEDDING_MODEL=${PENGUINCODE_EMBEDDING_MODEL:-nomic-embed-text}
+      - QDRANT_URL=${QDRANT_URL:-}
+      - PGVECTOR_URL=${PGVECTOR_URL:-}
+
+      # GPU Regulators
+      - PENGUINCODE_VRAM_MB=${PENGUINCODE_VRAM_MB:-8192}
+      - PENGUINCODE_MAX_CONCURRENT=${PENGUINCODE_MAX_CONCURRENT:-2}
+      - PENGUINCODE_MAX_MODELS=${PENGUINCODE_MAX_MODELS:-1}
+
+      # Security & Defaults
+      - PENGUINCODE_SECURITY_LEVEL=${PENGUINCODE_SECURITY_LEVEL:-2}
+      - PENGUINCODE_TEMPERATURE=${PENGUINCODE_TEMPERATURE:-0.7}
+      - PENGUINCODE_MAX_TOKENS=${PENGUINCODE_MAX_TOKENS:-4096}
+
+      # Research Configuration
+      - PENGUINCODE_RESEARCH_ENGINE=${PENGUINCODE_RESEARCH_ENGINE:-duckduckgo}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_CX_ID=${GOOGLE_CX_ID:-}
+
+      # Generate config from ENV (default: true)
+      - PENGUINCODE_USE_ENV_CONFIG=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Mount config file if present
-      - ./config.yaml:/app/config.yaml:ro
       # Persist memory/cache data
       - penguincode-data:/app/.penguincode
+      # Optional: mount custom config (set PENGUINCODE_USE_ENV_CONFIG=false)
+      # - ./config.yaml:/app/config.yaml.mounted:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
