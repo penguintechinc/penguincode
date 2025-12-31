@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# PenguinCode run script - activates venv and runs the CLI
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Run penguincode with all passed arguments
+python -m penguincode_cli.main "$@"

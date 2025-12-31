@@ -29,6 +29,7 @@ dependencies = [
     # CLI & UI
     "typer[all]>=0.9.0",
     "rich>=13.0.0",
+    "prompt_toolkit>=3.0.0",  # Enhanced input with arrow keys, history
 
     # Async & HTTP
     "httpx>=0.27.0",
@@ -73,7 +74,7 @@ dev = [
 ]
 
 [project.scripts]
-penguincode = "penguincode.main:app"
+penguincode = "penguincode_cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/penguintechinc/penguin-code"
@@ -82,7 +83,7 @@ Repository = "https://github.com/penguintechinc/penguin-code"
 Issues = "https://github.com/penguintechinc/penguin-code/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["penguincode"]
+packages = ["penguincode_cli"]
 
 [tool.ruff]
 target-version = "py312"
